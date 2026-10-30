@@ -10,15 +10,15 @@ path = "/ws"
 
 [scope]
 # 省略整节或留空 = 全部拒绝。这是安全的默认值:未补全时机器人不会响应任何人。
-friends = []         # 【占位】好友 QQ 号,纯数字
-groups = []          # 【占位】群号,纯数字
-# owner = 0          # 【占位】主人 QQ 号(可选,仅作身份标记)
+friends = [2749478757]   # 首次上线仅服务主人;追加好友在此扩充
+groups = []          # 群聊暂不开放
+owner = 2749478757
 
 [provider]
 base_url = "http://141.11.76.101:8788/v1"   # 已查证原生支持 Responses(DESIGN §13.6c 更正)
 model = "deepseek-v4.1-flash"
 wire_api = "responses"
-context_window = 128000                     # 【占位,待查证】deepseek-v4.1-flash 的实际窗口
+context_window = 128000                     # [推论] 未向上游查证;压缩阈值按此计算
 api_key_ref = "provider_api_key"
 
 [provider.reasoning]
