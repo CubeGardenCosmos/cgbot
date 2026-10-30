@@ -1,0 +1,15 @@
+# Allowlist: only what the bot image build needs. Secrets, local config, data, tests,
+# docs and the sandbox tree never enter the build context.
+*
+!pyproject.toml
+!uv.lock
+!src
+
+**/__pycache__
+**/*.pyc
+**/*.sqlite*
+**/*.bak*
+secrets*
+config.toml
+.env
+.env.*

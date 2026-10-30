@@ -1,0 +1,85 @@
+# cgbot 部署配置模板(M5)。复制为宿主机 /home/klp/cgbot-run/config.toml 后,补全带"占位"标注的项,
+# 并删除这些标注(deploy/deploy.sh 发现残留标注会拒绝启动)。
+# 容器内路径:本文件挂载为 /app/config/config.toml;数据目录 /app/data。
+# 密钥只写引用名;值在 secrets.toml(0600),挂载为 /run/secrets/cgbot.toml。
+
+[napcat]
+host = "0.0.0.0"     # 容器内监听;不向宿主机发布端口,仅 qqbot_astrbot_network 内的 NapCat 可连入
+port = 6200
+path = "/ws"
+
+[scope]
+# 省略整节或留空 = 全部拒绝。这是安全的默认值:未补全时机器人不会响应任何人。
+friends = []         # 【占位】好友 QQ 号,纯数字
+groups = []          # 【占位】群号,纯数字
+# owner = 0          # 【占位】主人 QQ 号(可选,仅作身份标记)
+
+[provider]
+base_url = "http://141.11.76.101:8788/v1"   # 已查证原生支持 Responses(DESIGN §13.6c 更正)
+model = "deepseek-v4.1-flash"
+wire_api = "responses"
+context_window = 128000                     # 【占位,待查证】deepseek-v4.1-flash 的实际窗口
+api_key_ref = "provider_api_key"
+
+[provider.reasoning]
+summary = "low"      # 压缩摘要
+private = "high"     # 日常私聊
+planning = "max"     # 任务规划(设计待定)
+group = "low"        # 群聊轮次
+
+[storage]
+data_dir = "/app/data"   # 绝对路径,对应宿主机 /home/klp/cgbot-run/state
+
+[group]
+wake_keywords = ["大肥鱼"]
+mute_keywords = []
+idle_timeout_seconds = 600
+max_turns = 30
+skill_topics = 8
+skill_memes = 10
+skill_rules = 10
+skill_members = 20
+skill_habits_per_member = 5
+
+# 语音未启用:省略 [voice]。启用前须确认 ASR/TTS 守护进程地址在容器内可达。
+
+[logging]
+level = "INFO"
+
+[coding]
+enabled = true
+token_secret = "secret:coding_token"      # HMAC 密钥;每个沙盒令牌由它派生
+
+[coding.http]                             # 网关 + bridge 共用一个 aiohttp 服务
+host = "0.0.0.0"
+port = 8000
+public_base_url = "http://cgbot:8000"     # 沙盒与 NapCat 访问本服务的地址
+
+[coding.docker]
+host = "http://dsh-docker-proxy:2375"     # 旧 dsh-docker-caged 的 Docker API 白名单代理(只读引用)
+sandbox_image = "cgbot-sandbox:latest"
+network = "dsh_caged_internal"
+host_data_dir = "/home/klp/cgbot-data"    # 宿主机绝对路径,容器内同路径挂载
+egress_proxy = "http://dsh-egress:7890"
+idle_seconds = 3600
+container_prefix = "cgbot-sbx-"
+
+[coding.codex]
+model = "deepseek-v4.1-flash"
+reasoning_effort = "medium"
+appserver_port = 8765
+
+[coding.concurrency]
+per_user = 4
+degraded = 1
+degrade_failures = 3
+degrade_window_seconds = 60
+recover_after_seconds = 3600
+
+[coding.bridge]
+max_file_bytes = 536870912
+chunk_bytes = 2097152
+temp_dir = "/app/data/bridge"
+file_ttl_seconds = 86400
+
+# [coding.imagegen] 省略 = 图像生成不可用。需要时补全 base_url/api_key(secret:imagegen_key)/model/mode 等。

@@ -1,0 +1,56 @@
+# cgbot compose service (M5). Runs ONLY the `cgbot` service, project name `cgbot`.
+#
+# Host layout (created manually once; see docs/reference/deploy.md):
+#   /home/klp/cgbot-run/docker-compose.yml   this file (copied by deploy/deploy.sh)
+#   /home/klp/cgbot-run/config.toml          real config (0644, no secrets)
+#   /home/klp/cgbot-run/secrets.toml         real secrets (0600, never in git)
+#   /home/klp/cgbot-run/state/               bot SQLite / bridge temp (-> /app/data)
+#   /home/klp/cgbot-data/                    sandbox workspaces (same path inside bot)
+#
+# Start: deploy/deploy.sh --up   (never `compose up` without the external networks existing)
+
+name: cgbot
+
+services:
+  cgbot:
+    image: cgbot:${CGBOT_TAG:-latest}
+    container_name: cgbot          # DNS name for NapCat (qqbot_astrbot_network) and sandboxes
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 30s
+    read_only: true
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,size=256m
+    # Root inside the container is required to chown per-user workspaces (old manager pattern).
+    cap_drop: [ALL]
+    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER]
+    security_opt: ["no-new-privileges:true"]
+    pids_limit: 512
+    mem_limit: 1g
+    cpus: 2
+    environment:
+      TZ: Asia/Shanghai
+    volumes:
+      - ./config.toml:/app/config/config.toml:ro
+      - ./secrets.toml:/run/secrets/cgbot.toml:ro
+      - ./state:/app/data
+      # Sandbox bind mounts are resolved by the HOST Docker daemon, so the path must match.
+      - ${HOST_DATA_DIR:-/home/klp/cgbot-data}:${HOST_DATA_DIR:-/home/klp/cgbot-data}
+    networks:
+      - dsh_caged_internal         # sandboxes reach http://cgbot:8000 (gateway/bridge)
+      - dsh_caged_ctl              # reaches dsh-docker-proxy:2375 (Docker API allowlist)
+      - qqbot_astrbot_network      # NapCat connects to ws://cgbot:6200/ws; bot has LAN/Internet egress
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+# Networks are owned by the legacy dsh-docker-caged project. Never create/remove them here.
+networks:
+  dsh_caged_internal:
+    external: true
+  dsh_caged_ctl:
+    external: true
+  qqbot_astrbot_network:
+    external: true
