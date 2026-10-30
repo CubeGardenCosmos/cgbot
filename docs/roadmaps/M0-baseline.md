@@ -2,12 +2,12 @@
 
 将 [DESIGN.md](../DESIGN.md) 的已定、推论、待定和已被后续决议取代的内容分开，收束实施前的接口验证与工程约定。不实施业务，不访问远端或变更现有部署。所属：[M0](../MILESTONE.md)。
 
-状态：待决策
+状态：待验收
 
 | 编号 | 能力 | 依赖 | 验收条件 | 状态 | TODO 链接 |
 | --- | --- | --- | --- | --- | --- |
-| R0.1 | 设计基线收束与外部验证；归属：设计负责人（具体人待定） | DESIGN.md 全文；真实验证另需授权与测试环境 | §12.3/§13.5 每项有最新决议或明确责任条目，无无主待答；上游 :8788 Responses、NapCat input_status / set_input_status event_type、反向 WS 参数有真实验证证据 | 待决策 | [TODO](../todos/R0.1-design-closure.md) |
-| R0.2 | 工程约定；归属：工程负责人（具体人待定） | R0.1 已定边界；Python 已定 | Python 版本、依赖/环境管理、配置格式、目录、测试、日志、密钥处理逐项确认，未凭经验默认选型 | 待决策 | [TODO](../todos/R0.2-engineering-conventions.md) |
+| R0.1 | 设计基线收束与外部验证；归属：设计负责人（具体人待定） | DESIGN.md 全文；真实验证另需授权与测试环境 | §12.3/§13.5 每项有最新决议或明确责任条目，无无主待答；上游 :8788 Responses、NapCat input_status / set_input_status event_type、反向 WS 参数有真实验证证据 | 待验收 | [TODO](../todos/R0.1-design-closure.md) |
+| R0.2 | 工程约定；归属：工程负责人（具体人待定） | R0.1 已定边界；Python 已定 | Python 版本、依赖/环境管理、配置格式、目录、测试、日志、密钥处理逐项确认，未凭经验默认选型 | 待验收 | [TODO](../todos/R0.2-engineering-conventions.md) |
 
 ## 待决策
 

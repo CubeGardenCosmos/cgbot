@@ -2,13 +2,13 @@
 
 目标:为 QQ 语音接入现有 ASR/SoVITS,补齐独立于 AstraBot 的媒体转换与发送链路。只写客户端,不修改、重启或重新配置任何语音服务端。依据:DESIGN.md §8、§11.3、§11.9、§12.2。
 
-所属:[M4](../MILESTONE.md)。状态:待决策。能力归属:R4.1/R4.2 为语音客户端,R4.3 为媒体处理与 NapCat 出口;实施负责人待分配。
+所属:[M4](../MILESTONE.md)。状态:进行中。能力归属:R4.1/R4.2 为语音客户端,R4.3 为媒体处理与 NapCat 出口;实施负责人待分配。
 
 | 编号 | 能力 | 依赖 | 验收条件 | 状态 | TODO 链接 |
 | --- | --- | --- | --- | --- | --- |
-| R4.1 | ASR 客户端 | R0.2、R1.1、R1.2;与 R4.3 联调 | 按现有长度前缀 JSON 协议调用 transcribe,读取 text/raw_text;真实语音可转写,服务端无改动 | 待决策 | [TODO](../todos/R4.1-asr-client.md) |
-| R4.2 | TTS 客户端 | R0.2、R1.1;文件可读路径方案 | 按现有协议调用 tts,识别 host_path/container_path 返回的 WAV;不承诺多音色或字节返回,服务端无改动 | 待决策 | [TODO](../todos/R4.2-tts-client.md) |
-| R4.3 | 语音媒体转换与发送 | R1.2、R1.6、R4.1、R4.2 | QQ 语音→WAV→ASR、TTS WAV→silk→record 形成真实链路,不依赖 AstraBot 内部转换函数 | 待决策 | [TODO](../todos/R4.3-voice-media-conversion.md) |
+| R4.1 | ASR 客户端 | R0.2、R1.1、R1.2;与 R4.3 联调 | 按现有长度前缀 JSON 协议调用 transcribe,读取 text/raw_text;真实语音可转写,服务端无改动 | 待验收 | [TODO](../todos/R4.1-asr-client.md) |
+| R4.2 | TTS 客户端 | R0.2、R1.1;文件可读路径方案 | 按现有协议调用 tts,识别 host_path/container_path 返回的 WAV;不承诺多音色或字节返回,服务端无改动 | 进行中 | [TODO](../todos/R4.2-tts-client.md) |
+| R4.3 | 语音媒体转换与发送 | R1.2、R1.6、R4.1、R4.2 | QQ 语音→WAV→ASR、TTS WAV→silk→record 形成真实链路,不依赖 AstraBot 内部转换函数 | 进行中 | [TODO](../todos/R4.3-voice-media-conversion.md) |
 
 ## 待决策
 

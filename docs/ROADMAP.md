@@ -7,13 +7,13 @@
 | --- | --- | --- |
 | M0 | [基线与决策收束](roadmaps/M0-baseline.md) | R0.1、R0.2 待验收 |
 | M1 | [核心骨架](roadmaps/M1-core.md) | 进行中 |
-| M2 | [私聊体验](roadmaps/M2-private-chat.md) | 规划中 |
-| M3 | [群聊子系统](roadmaps/M3-group-chat.md) | 规划中 |
-| M4 | [语音](roadmaps/M4-voice.md) | 规划中 |
+| M2 | [私聊体验](roadmaps/M2-private-chat.md) | 进行中 |
+| M3 | [群聊子系统](roadmaps/M3-group-chat.md) | 进行中 |
+| M4 | [语音](roadmaps/M4-voice.md) | 进行中 |
 | M5 | [Coding Agent](roadmaps/M5-coding-agent.md) | 规划中 |
 | M6 | [后置与上线](roadmaps/M6-later.md) | 规划中,实施前拆分 |
 
 ## 当前执行记录
 
 - [DESIGN.md](DESIGN.md) 已记录 2026-10-30 的十四轮讨论与调研(NapCat/Codex/OpenClaw/AstrBot/语音服务/记忆设计文档)。
-- 全部 TODO 已建立(M6 除外),**均未开工**;先做 M0。见 [TODO 索引](todos/README.md)。
+- 全部 TODO 已建立(M6 除外);M0 待验收,M1–M4 进行中,M5 未开工。见 [TODO 索引](todos/README.md)。
