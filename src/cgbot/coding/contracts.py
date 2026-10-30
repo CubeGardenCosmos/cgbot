@@ -227,3 +227,23 @@ class CodingService(Protocol):
     async def start(self) -> None: ...
 
     async def close(self) -> None: ...
+
+
+# ---------------------------------------------------------------- host-side user layout
+
+
+def workspace_dir(host_data_dir: Path, user_id: str) -> Path:
+    """Host path mounted at /workspace in the user's sandbox (and visible to the bot)."""
+    return host_data_dir / "users" / user_id
+
+
+def home_dir(host_data_dir: Path, user_id: str) -> Path:
+    """Host path mounted at /home/agent: Codex state, Playwright profile, caches. Persistent."""
+    return host_data_dir / "homes" / user_id
+
+
+# Environment variables the bot sets on every sandbox container (contract with sandbox/ image):
+#   CGBOT_USER_ID, CGBOT_GATEWAY_URL (http://cgbot:8000/v1), CGBOT_GATEWAY_TOKEN,
+#   CGBOT_BRIDGE_URL (http://cgbot:8000/bridge), CGBOT_BRIDGE_TOKEN (same value as the gateway
+#   token), CGBOT_WS_TOKEN (app-server capability token), CGBOT_APPSERVER_PORT, CGBOT_MODEL,
+#   CGBOT_REASONING_EFFORT, HTTP_PROXY/HTTPS_PROXY/NO_PROXY (egress; the bot host is in NO_PROXY).
