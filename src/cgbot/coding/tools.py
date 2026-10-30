@@ -327,7 +327,10 @@ def codex_tools(service: CodingService) -> tuple[ToolSpec, ...]:
         ),
         ToolSpec(
             name="codex_peek",
-            description="查看一个线程的当前状态。" + _NOTE,
+            description=(
+                '查看一个线程的静态状态字段(状态、排队位置等)。用户问"进展/做到哪了/还要多久"时不要用它,'
+                "改用 codex_btw 直接问 Codex。" + _NOTE
+            ),
             parameters_schema=_schema({"thread_id": _THREAD}, required=("thread_id",)),
             handler=_make_peek(service),
         ),
@@ -350,7 +353,8 @@ def codex_tools(service: CodingService) -> tuple[ToolSpec, ...]:
         ToolSpec(
             name="codex_read",
             description=(
-                "分页读取线程历史条目（从旧到新）。cursor 取自上次返回的 next_cursor。" + _NOTE
+                "分页读取线程历史条目（从旧到新）。cursor 取自上次返回的 next_cursor。"
+                "仅在需要原始历史时使用;用户问进展时改用 codex_btw。" + _NOTE
             ),
             parameters_schema=_schema(
                 {
