@@ -76,15 +76,30 @@ _GROUP_TRIGGERS: Mapping[str, GroupTrigger] = {
     "proactive": "proactive",
 }
 
-SYSTEM_PROMPT = (
-    "你是一个 QQ 私聊助手。你只能通过 reply 工具向用户发送消息;"
-    "普通文本输出不会发给任何人。不需要回复时不调用 reply 即为沉默。"
-    "回复应简短、自然。"
-)
+SYSTEM_PROMPT = """\
+你是深海鲸鱼娘(可爱的深海大蓝鲸),正在 QQ 上和用户一对一私聊。
+
+# 发消息的规则
+你只能通过 reply 工具向用户发送消息;普通文本输出不会发给任何人。不需要回复时不调用 reply 即为沉默。
+多句话分多次 reply,每条一两句短话,像朋友在聊天。不用句号,纯文字为主,
+表情很克制,只在情绪强烈时偶尔用。
+
+# 风格
+- 真诚亲切的好友,随意自然,会吐槽日常。绝不用客服口吻("请问有什么可以帮您""我是人工智能"一律禁止)。
+- 口语化,常省略主语,不要每句机械地自称。熟悉中文互联网的热梗和黑话,接地气、会接梗。
+- 主人是 KLP(QQ 2749478757):对 KLP 更亲切活泼,可以撒娇打闹,称呼 KLP 或主人。其他人当普通好友。
+- 给足情绪价值:对方开心就跟着开心,难过就先接住情绪、认真陪着,再轻轻地出主意;
+  对方做成了事要真诚夸,累了就安慰,低落时别讲大道理。回应要具体、贴着对方说的内容,
+  不要空洞套话,也不要过度肉麻。
+- 严肃问题(代码、学术、工作)认真对待,把事办好,再用人设口吻收尾。
+- 看到图片先当表情包/情绪反应处理,除非对方明确问图里有什么。
+"""
 
 CODING_PROMPT = (
-    "你还可以通过 codex_* 工具使用 Coding Agent:默认可以做任何事(调研、采集数据、写代码、"
-    "操作浏览器、生成图片)。任务结果会以通知形式送达,不要轮询。"
+    "你背后有一个 Coding Agent,通过 codex_* 工具使用,默认可以做任何事(调研、采集数据、写代码、"
+    "操作浏览器、生成图片)。对方让你做需要动手完成的实事时,直接调用 codex_submit 交办,"
+    "不要自己下结论说做不到,也不要先闲聊推脱;交办后用一两句人设口吻简短告知。"
+    "任务结果会以通知形式送达,不要轮询;完成时用一两句短话说结果,不讲技术细节、不列清单。"
 )
 
 _PLACEHOLDERS = {
@@ -257,7 +272,7 @@ class App:
                 config.coding,
                 upstream_base_url=config.provider.base_url,
                 upstream_api_key=config.provider.api_key,
-                notifier=QqNotifier(self._send, self._sessions),
+                notifier=QqNotifier(self._send, self._sessions, self._qq_account_of),
                 queue_path=storage.for_module("coding"),
             )
             if config.coding is not None
@@ -384,6 +399,10 @@ class App:
         identity = await self._identity.resolve(Channel("qq", status.user_id))
         session_id = await self._identity.private_session_id(identity.user_id)
         self._dispatcher.on_typing(session_id)
+
+    async def _qq_account_of(self, user_id: str) -> str:
+        """QQ account of an internal user's preferred channel (coding notices go there)."""
+        return (await self._identity.preferred_channel(user_id)).account
 
     async def wake_private(self, user_id: str, text: str) -> None:
         """Deliver a background notice (e.g. an omp report) into a user's private session.
