@@ -9,7 +9,7 @@ from __future__ import annotations
 import asyncio
 import json
 import sqlite3
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
@@ -140,6 +140,7 @@ class ScriptedProvider:
         self._script = list(script)
         self._gate = gate
         self.requests: list[ModelRequest] = []
+        self.called = asyncio.Event()  # set by the first model call; tests await it, not spin
 
     @property
     def name(self) -> str:
@@ -151,6 +152,7 @@ class ScriptedProvider:
 
     async def respond(self, request: ModelRequest) -> ModelResponse:
         self.requests.append(request)
+        self.called.set()
         if self._gate is not None and len(self.requests) == 1:
             await self._gate.wait()
         if not self._script:
@@ -177,14 +179,6 @@ def install(app: App, recorder: Recorder) -> None:
 async def flush() -> None:
     for _ in range(20):
         await asyncio.sleep(0)
-
-
-async def wait_until(condition: Callable[[], bool]) -> None:
-    for _ in range(200):
-        if condition():
-            return
-        await asyncio.sleep(0)
-    raise AssertionError("condition not reached")
 
 
 async def settle(app: App, clock: FakeTimebase) -> None:
@@ -300,7 +294,7 @@ async def test_message_during_running_turn_interrupts_and_restarts_with_new_only
 
     await app.handle_message(private_msg("m1", IN_SCOPE, "第一条"))
     clock.advance(QUIET_SECONDS)
-    await wait_until(lambda: len(provider.requests) == 1)  # first model call is in flight
+    await asyncio.wait_for(provider.called.wait(), timeout=5)  # first model call is in flight
 
     await app.handle_message(private_msg("m2", IN_SCOPE, "第二条"))
     await settle(app, clock)

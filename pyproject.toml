@@ -25,6 +25,7 @@ packages = ["src/cgbot"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]
+pythonpath = ["tests/omp"]
 markers = [
     "integration: 真实边界集成测试,默认跳过,须用户授权",
     "platform: 平台检查",
@@ -42,4 +43,5 @@ select = ["E", "F", "I", "UP", "B", "ASYNC"]
 [tool.pyright]
 include = ["src", "tests"]
 pythonVersion = "3.12"
+extraPaths = ["tests/omp"]
 typeCheckingMode = "standard"

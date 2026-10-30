@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from pathlib import Path
 from typing import cast
@@ -148,13 +149,21 @@ async def test_notify_sends_private_message_and_records_delivery(store: AsyncSes
     assert payload["delivered"] is True
 
 
-async def test_history_record_never_contains_message_body(store: AsyncSessionStore) -> None:
+async def test_history_record_carries_clipped_model_item_without_urls(
+    store: AsyncSessionStore,
+) -> None:
     notifier = QqNotifier(RecordingSender(), store)
-    secret_body = "机密正文-不应入库"
-    await notifier.notify(_notice(text=secret_body))
+    long_body = "进展" * 2000  # longer than MODEL_TEXT_LIMIT, so it must be clipped
+    await notifier.notify(_notice(text=long_body, files=(_stored("file"),)))
     items = await store.load("private:1001")
-    assert secret_body not in repr(items[0].payload)
-    assert "text" not in items[0].payload
+    payload = items[0].payload
+    assert "text" not in payload  # top-level metadata only; the body lives in the model item
+    rendered = json.dumps(payload["item"], ensure_ascii=False)
+    assert long_body not in rendered
+    assert "…" in rendered
+    assert "[系统通知]" in rendered
+    assert "a.bin" in rendered
+    assert "https://" not in rendered
 
 
 async def test_send_result_not_ok_is_recorded_undelivered(
