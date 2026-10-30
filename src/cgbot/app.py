@@ -20,6 +20,8 @@ from typing import Any
 
 from cgbot.agent import AgentRunner, TurnResult, builtin_tools
 from cgbot.agent.tools import ToolContext, ToolResult, ToolSpec
+from cgbot.coding.notifier import QqNotifier
+from cgbot.coding.stack import CodingStack
 from cgbot.compaction import Compactor
 from cgbot.config import Config
 from cgbot.dispatch import PrivateDispatcher, PrivateMessage, Timebase
@@ -75,6 +77,11 @@ SYSTEM_PROMPT = (
     "你是一个 QQ 私聊助手。你只能通过 reply 工具向用户发送消息;"
     "普通文本输出不会发给任何人。不需要回复时不调用 reply 即为沉默。"
     "回复应简短、自然。"
+)
+
+CODING_PROMPT = (
+    "你还可以通过 codex_* 工具使用 Coding Agent:默认可以做任何事(调研、采集数据、写代码、"
+    "操作浏览器、生成图片)。任务结果会以通知形式送达,不要轮询。"
 )
 
 _PLACEHOLDERS = {
@@ -230,11 +237,25 @@ class App:
             tiers,
             is_busy=self._is_busy,
         )
+        self._coding: CodingStack | None = (
+            CodingStack(
+                config.coding,
+                upstream_base_url=config.provider.base_url,
+                upstream_api_key=config.provider.api_key,
+                notifier=QqNotifier(self._send, self._sessions),
+                queue_path=storage.for_module("coding"),
+            )
+            if config.coding is not None
+            else None
+        )
         registry = builtin_tools()
         for spec in memory_tools(self._memory):
             registry.register(spec)
         if self._voice is not None:
             registry.register(self._send_voice_tool(self._voice))
+        if self._coding is not None:
+            for spec in self._coding.tools:
+                registry.register(spec)
         self._runner = AgentRunner(
             provider=provider,
             store=self._sessions,
@@ -280,6 +301,8 @@ class App:
 
     async def start(self) -> None:
         await self._groups.restore()
+        if self._coding is not None:
+            await self._coding.start()
         await self.napcat.start()
         await self._scheduler.start()
         self._sweep_task = asyncio.create_task(self._sweep_loop(), name="group-sweep")
@@ -292,6 +315,8 @@ class App:
         await self.napcat.stop()
         await self._dispatcher.close()
         await _cancel_tasks(list(self._tasks))
+        if self._coding is not None:
+            await self._coding.stop()
         await self._scheduler.stop()
         self._scheduler.close()
         await self._sessions.close()
@@ -465,9 +490,10 @@ class App:
         entries = await self._memory.list_for_prompt(
             viewer=Viewer.private(user_id), budget_chars=MEMORY_PROMPT_CHARS
         )
+        prompt = SYSTEM_PROMPT if self._coding is None else f"{SYSTEM_PROMPT}\n\n{CODING_PROMPT}"
         if not entries:
-            return SYSTEM_PROMPT
-        return f"{SYSTEM_PROMPT}\n\n{MEMORY_HEADER}\n{format_entries(entries)}"
+            return prompt
+        return f"{prompt}\n\n{MEMORY_HEADER}\n{format_entries(entries)}"
 
     def _on_response(self, session_id: str, usage: Usage, through_seq: int) -> None:
         self._compactor.record_usage(session_id, usage, through_seq)
