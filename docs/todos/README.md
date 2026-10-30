@@ -8,7 +8,7 @@
 | 条目 | TODO | 状态 |
 | --- | --- | --- |
 | R0.1 | [设计基线收束与外部验证](R0.1-design-closure.md) | 进行中 |
-| R0.2 | [工程约定](R0.2-engineering-conventions.md) | 待决策 |
+| R0.2 | [工程约定](R0.2-engineering-conventions.md) | 进行中 |
 
 ## M1 核心骨架
 
