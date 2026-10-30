@@ -22,6 +22,7 @@ from cgbot.agent import AgentRunner, TurnResult, builtin_tools
 from cgbot.agent.tools import ToolContext, ToolResult, ToolSpec
 from cgbot.coding.notifier import QqNotifier
 from cgbot.coding.stack import CodingStack
+from cgbot.coding.staging import ImageStager, StageError
 from cgbot.compaction import Compactor
 from cgbot.config import Config
 from cgbot.dispatch import PrivateDispatcher, PrivateMessage, Timebase
@@ -48,6 +49,7 @@ from cgbot.provider import ModelProvider, Usage, user_message
 from cgbot.provider.tiers import effort_for
 from cgbot.scheduler import KIND_COMPACTION_IDLE, Scheduler, SystemEvent
 from cgbot.search import SearchService, search_tools
+from cgbot.search.gemini import GeminiSearchClient
 from cgbot.session import AsyncSessionStore
 from cgbot.voice import (
     AsrClient,
@@ -101,6 +103,7 @@ CODING_PROMPT = (
     "操作浏览器、生成图片)。对方让你做需要动手完成的实事时,直接调用 codex_submit 交办,"
     "不要自己下结论说做不到,也不要先闲聊推脱;交办后用一两句人设口吻简短告知。"
     "任务结果会以通知形式送达,不要轮询;完成时用一两句短话说结果,不讲技术细节、不列清单。"
+    "消息中标注已保存到沙盒的图片可按给出的 /workspace 路径交给 Coding Agent 使用。"
 )
 
 _PLACEHOLDERS = {
@@ -242,6 +245,17 @@ class App:
         )
         self._memory = MemoryBook(storage.for_module("memory"))
         self._search = SearchService(config.search)
+        self._gemini: GeminiSearchClient | None = None
+        gemini = config.search.gemini
+        if gemini.enabled:
+            if gemini.token is None:
+                raise ValueError("[search.gemini] token_ref is required when enabled")
+            self._gemini = GeminiSearchClient(
+                gemini.endpoint,
+                gemini.token.reveal(),
+                gemini.model,
+                gemini.timeout_seconds,
+            )
         # omp (ompweb) control plane: state lives in its own SQLite file; wakes re-enter privately.
         self._omp_store = OmpStore(storage.for_module("omp"))
         self._omp = OmpService(
@@ -276,14 +290,19 @@ class App:
                 upstream_api_key=config.provider.api_key,
                 notifier=QqNotifier(self._send, self._sessions, self._qq_account_of),
                 queue_path=storage.for_module("coding"),
+                search_service=self._search,
+                gemini_client=self._gemini,
             )
             if config.coding is not None
             else None
         )
+        self._image_stager = (
+            ImageStager(config.coding.docker.host_data_dir) if config.coding is not None else None
+        )
         registry = builtin_tools()
         for spec in memory_tools(self._memory):
             registry.register(spec)
-        for spec in search_tools(self._search):
+        for spec in search_tools(self._search, gemini_client=self._gemini):
             registry.register(spec)
         if self._voice is not None:
             registry.register(self._send_voice_tool(self._voice))
@@ -384,6 +403,9 @@ class App:
             return
         channel = Channel("qq", message.user_id)
         identity = await self._identity.resolve(channel)
+        notes = await self._stage_private_images(identity.user_id, message.segments)
+        if notes:
+            text += "\n" + "\n".join(notes)
         session_id = await self._identity.private_session_id(identity.user_id)
         self._dispatcher.on_message(
             PrivateMessage(
@@ -491,6 +513,28 @@ class App:
                 await self._groups.sweep()
             except Exception:
                 log.exception("group sweep failed")
+
+    async def _stage_private_images(self, user_id: str, segments: Sequence[Segment]) -> list[str]:
+        if self._coding is None or self._image_stager is None:
+            return []
+        notes: list[str] = []
+        for segment in segments:
+            if segment.type != "image":
+                continue
+            url = segment.data.get("url") or segment.data.get("file")
+            if not isinstance(url, str):
+                log.warning("image staging failed: code=E_URL")
+                continue
+            try:
+                path = await self._image_stager.stage(user_id, url)
+            except StageError as exc:
+                log.warning("image staging failed: code=%s", exc.code)
+            except Exception:
+                # URLs may contain credentials; never log exception details or the segment.
+                log.warning("image staging failed: code=E_INTERNAL")
+            else:
+                notes.append(f"[图片已保存到沙盒: {path}]")
+        return notes
 
     async def _render_private(self, segments: Sequence[Segment]) -> str:
         record_texts: dict[int, str] = {}

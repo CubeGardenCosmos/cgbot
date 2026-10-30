@@ -9,9 +9,12 @@ import pytest
 from coding_app_fakes import FakePart, NullNotifier, coding_config
 
 import cgbot.coding.stack as stack_module
+from cgbot.coding.auth import HmacSandboxAuth
 from cgbot.coding.governor import ConcurrencyGovernor
 from cgbot.coding.stack import CodingStack
-from cgbot.config.settings import Secret
+from cgbot.config.settings import SearchConfig, Secret
+from cgbot.search import SearchService
+from cgbot.search.gemini import GeminiSearchClient
 
 TOOL_NAMES = {
     "codex_submit",
@@ -54,6 +57,9 @@ def _install(
     monkeypatch.setattr(stack_module, "ImageGenService", factory("imagegen"))
     monkeypatch.setattr(stack_module, "CodingWeb", factory("web"))
     monkeypatch.setattr(stack_module, "imagegen_routes", lambda _service, _auth: ["imagegen-route"])
+    monkeypatch.setattr(
+        stack_module, "search_routes", lambda _service, _gemini, _auth: ["search-route"]
+    )
     return parts
 
 
@@ -131,7 +137,7 @@ async def test_stop_isolates_a_failing_step(
     assert "coding manager stop failed: error=RuntimeError" in caplog.text
 
 
-async def test_web_gets_governor_hook_and_both_route_sets(
+async def test_web_gets_governor_hook_and_all_route_sets(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     parts = _install(monkeypatch, [])
@@ -140,7 +146,52 @@ async def test_web_gets_governor_hook_and_both_route_sets(
     web_kwargs = parts["web"].kwargs
     hook = web_kwargs["status_hook"]
     assert isinstance(getattr(hook, "__self__", None), ConcurrencyGovernor)
-    assert web_kwargs["extra_routes"] == ["bridge-route", "imagegen-route"]
+    assert web_kwargs["extra_routes"] == ["bridge-route", "imagegen-route", "search-route"]
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+async def test_search_routes_receive_shared_services_and_sandbox_auth(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, enabled: bool
+) -> None:
+    parts = _install(monkeypatch, [])
+    service = SearchService(SearchConfig()) if enabled else None
+    gemini = (
+        GeminiSearchClient("https://relay.example/search", "test-token", "gemini-2.5-flash")
+        if enabled
+        else None
+    )
+    received: list[tuple[SearchService | None, GeminiSearchClient | None, HmacSandboxAuth]] = []
+
+    def routes(
+        search: SearchService | None,
+        client: GeminiSearchClient | None,
+        auth: HmacSandboxAuth,
+    ) -> list[str]:
+        received.append((search, client, auth))
+        return ["web-search-route", "gemini-search-route"]
+
+    monkeypatch.setattr(stack_module, "search_routes", routes)
+    CodingStack(
+        coding_config(tmp_path),
+        upstream_base_url="https://upstream.example/v1",
+        upstream_api_key=Secret("upstream-key"),
+        notifier=NullNotifier(),
+        queue_path=tmp_path / "queue.sqlite",
+        search_service=service,
+        gemini_client=gemini,
+    )
+
+    assert len(received) == 1
+    assert received[0][:2] == (service, gemini)
+    assert isinstance(received[0][2], HmacSandboxAuth)
+    assert parts["web"].kwargs["extra_routes"] == [
+        "bridge-route",
+        "imagegen-route",
+        "web-search-route",
+        "gemini-search-route",
+    ]
+    if service is not None:
+        await service.close()
 
 
 async def test_tools_are_the_codex_family(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -18,7 +19,12 @@ from test_app import (
     text_resp,
 )
 
+import cgbot.app as app_module
+from cgbot.agent.tools import ToolSpec
 from cgbot.app import App
+from cgbot.config.settings import SearchGeminiConfig, Secret
+from cgbot.search import SearchService, search_tools
+from cgbot.search.gemini import GeminiSearchClient
 
 
 def _app(tmp_path: Path, provider: ScriptedProvider, clock: FakeTimebase) -> App:
@@ -59,3 +65,43 @@ async def test_stop_closes_the_search_service(
     await app.stop()
 
     assert closed == [True]
+
+
+async def test_enabled_gemini_client_is_shared_with_search_tools(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    quiet_watchers(monkeypatch)
+    config = make_config(tmp_path)
+    config = replace(
+        config,
+        search=replace(
+            config.search,
+            gemini=SearchGeminiConfig(
+                enabled=True,
+                endpoint="https://relay.example/search",
+                token=Secret("test-gemini-token"),
+            ),
+        ),
+    )
+    received: list[tuple[SearchService, GeminiSearchClient | None]] = []
+
+    def tools(
+        service: SearchService, *, gemini_client: GeminiSearchClient | None = None
+    ) -> list[ToolSpec]:
+        received.append((service, gemini_client))
+        return search_tools(service, gemini_client=gemini_client)
+
+    monkeypatch.setattr(app_module, "search_tools", tools)
+    clock = FakeTimebase()
+    provider = ScriptedProvider(text_resp("好"))
+    app = App(config, provider, timebase=clock)
+    install(app, Recorder())
+
+    await app.handle_message(private_msg("m1", IN_SCOPE, "你好"))
+    await settle(app, clock)
+
+    assert received == [(app._search, app._gemini)]  # noqa: SLF001 - wiring under test
+    assert isinstance(received[0][1], GeminiSearchClient)
+    offered = {tool["name"] for tool in provider.requests[0].tools}
+    assert {"web_search", "gemini_search"} <= offered
+    await app.stop()

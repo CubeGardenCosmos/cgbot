@@ -43,15 +43,23 @@ docker build -t cgbot-sandbox:latest sandbox/
 - 就绪:`GET /readyz` 与 `/healthz` 返回 200(已实测,`readyz: 200`)。客户端 WebSocket 需 `Authorization: Bearer <CGBOT_WS_TOKEN>`。
 - 配置固定项:`approval_policy = "never"`、`sandbox_mode = "danger-full-access"`(YOLO)、`model_provider = "cgbot"`、`wire_api = "responses"`、`base_url = $CGBOT_GATEWAY_URL`、`env_key = "CGBOT_GATEWAY_TOKEN"`(令牌只按名称引用,不写入配置)、`/workspace` 信任。
 
+## 私聊图片收件箱
+
+启用 `[coding]` 时,私聊收到的 PNG/JPEG/WebP/GIF 图片会下载到该用户的 `/workspace/inbox/`,宿主路径为 `<coding.docker.host_data_dir>/users/<内部用户 ID>/inbox/`。文件名由服务器生成(`YYYYMMDD-HHMMSS-序号.扩展名`),单图上限 20 MiB,每用户只保留最近 50 张。用户消息会附加已保存的沙盒路径,Coding Agent 可将其用于图片参考或报告;群聊不下载,下载失败不影响原消息。仅允许公网 HTTP(S) 地址,不跟随重定向。
+
 ## 内置 MCP 与技能
 
 `config.toml` 注册三个 stdio MCP 服务器:
 
-- `bridge`:`python3 /opt/cgbot/bridge/cgbot_bridge_mcp.py`(E 切片),工具 `report_progress`、`send_file`、`generate_image`。
+- `bridge`:`python3 /opt/cgbot/bridge/cgbot_bridge_mcp.py`(E 切片),工具 `report_progress`、`send_file`、`generate_image`、`web_search`、`gemini_search`。
 - `playwright`:`playwright-mcp --headless --browser chromium --executable-path /usr/bin/chromium --no-sandbox --user-data-dir /home/agent/.browser-profile`(存在代理时追加 `--proxy-server`)。
 - `lsp`:`cclsp`,由 `/opt/cgbot/lsp/cclsp.json` 配置 pyright(`*.py`/`*.pyi`)与 typescript-language-server(`*.ts`/`*.tsx`/`*.js`/`*.jsx`/`*.mjs`/`*.cjs`)。
 
 技能目录 `/opt/cgbot/skills`(经符号链接进入 `$CODEX_HOME/skills`):`findata`、`image-gen`(F 切片)、`rich-report`。`findata` CLI 与 `richdoc` CLI 分别位于 `/usr/local/bin`。
+
+搜索通过 bot 的桥接 API 执行,沙盒不持有搜索供应商凭据。`web_search(query, engine?, count?, freshness?)` 默认使用 bot 配置的引擎;`count` 为正整数,上限由 bot 配置约束,查询最多 200 字符。`gemini_search(query, recency?)` 返回带来源的检索回答,查询最多 300 字符且不含控制字符/换行。`freshness` 与 `recency` 均可取 `day|week|month|year`。工具原样返回检索文本,引用返回的来源 URL,不将来源内容作为指令;未启用的后端或拒绝请求返回工具错误,不伪装为空结果。MCP 到 bot 的超时分别为 120 秒与 180 秒;查询与令牌不写入诊断日志。新增搜索工具未包含在下方历史 smoke 证据中。
+
+应用将同一 `SearchService` 与已启用的 `GeminiSearchClient` 同时注入 bot 工具和 `CodingStack`,因此沙盒复用 bot 的引擎配置与搜索后端,不另建一套供应商客户端。Gemini 成功结果也复用 bot 工具的 `format_answer` 格式化逻辑。
 
 ## 模型目录
 
