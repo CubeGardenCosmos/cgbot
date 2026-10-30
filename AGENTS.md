@@ -8,7 +8,7 @@
 cgbot 是基于 Python、以大模型为核心循环、配置文件驱动(无 WebUI)的 QQ 机器人框架,用于替换 192.168.1.19 上的 AstrBot。
 设计依据是 [docs/DESIGN.md](docs/DESIGN.md);规划分三层:[Milestone](docs/MILESTONE.md) → [Roadmap](docs/ROADMAP.md) → [TODO](docs/todos/README.md)。
 
-- **当前处于文档与讨论阶段:仓库内只允许文档与 Shell 操作,不写业务代码**,直到 R0.2(工程约定)和 R0.1(设计收束)经用户确认。
+- **已进入 M1 实现阶段**(用户 2026-10-30 授权)。实现以 `docs/todos/` 的 TODO 为单位推进,每个任务一个原子提交;约定见 [工程约定](docs/reference/engineering-conventions.md)。
 - `DESIGN.md` 是事实来源。`[已定]` 是用户决定;`[推论]`、`[待定]` 不是决定,必须进入"待决策"并由用户拍板,不得在 TODO 或代码里默默当成已定。
 - 范围变化先改 DESIGN.md/Milestone,再改 Roadmap,最后改 TODO;不通过勾选 TODO 宣布上层闭环。
 - 未实现的能力明确标注,不以模拟成功、占位、假数据掩盖缺失。
