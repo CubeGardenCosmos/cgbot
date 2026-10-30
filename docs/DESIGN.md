@@ -503,3 +503,5 @@ flowchart LR
 - 2026-10-30:纳入第十二轮(回报桥接支持 512MB 二进制、Codex 子代理不限但按用户并发限制 4→1、Playwright 登录态持久化)。
 - 2026-10-30:纳入第十三轮(512MB 文件按 2MB 切块、QQ 侧限制暂不处理、429 降级后 1 小时无 429 直接恢复)。
 - 2026-10-30:纳入第十四轮(1 分钟内 3 次 429/故障降级、降级全局)。
+- 2026-10-30:纳入第十五轮(用户决定:群续聊=其他人回复即续、免 @、3 分钟无人接话结束;静音词任何 @ 或回复机器人者可触发;群 SKILL 用 JSON 卡片;群会话 10 分钟无新消息或 30 轮结束;会话与记忆本同用 SQLite;授权只读取 .19 凭据验证上游)。`[已定]`
+- 2026-10-30:`[已查证]` 上游 `http://141.11.76.101:8788/v1`(模型 `deepseek-v4.1-flash`)原生支持 Responses:非流式 `/responses` 返回 200 且含 reasoning 项;流式含 `response.created/output_item.added/function_call_arguments.delta|done/output_item.done/completed`;`function_call` → `function_call_output` 往返成功。仅小规模探测,未测:`previous_response_id`、`reasoning.effort`、`instructions`、`/responses/compact`、长上下文、并发与 429 行为、`apply_patch`/`shell` 等 Codex 专用工具类型。`/models` 返回含多个模型(本次未全量记录)。密钥只在远端读取,未输出。
