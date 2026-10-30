@@ -24,6 +24,7 @@ from cgbot.config.settings import (
     StoragePaths,
     WireApi,
 )
+from cgbot.voice.config import load_voice_config
 
 SECRETS_FILE_ENV: Final = "CGBOT_SECRETS_FILE"
 SECRET_ENV_PREFIX: Final = "CGBOT_SECRET_"
@@ -67,6 +68,7 @@ def load_config(
     group = _group(root.sub("group"))
     storage = _storage(root.sub("storage"), config_path.parent)
     logging_cfg = _logging(root.sub("logging"))
+    voice_raw = root.raw_table("voice")
     root.close()
 
     return Config(
@@ -76,6 +78,7 @@ def load_config(
         group=group,
         storage=storage,
         logging=logging_cfg,
+        voice=load_voice_config(voice_raw) if voice_raw is not None else None,
     )
 
 
@@ -134,8 +137,24 @@ def _provider(t: _Table, source: _SecretSource) -> ProviderConfig:
 def _group(t: _Table) -> GroupConfig:
     wake = t.text_list("wake_keywords", ("大肥鱼",))
     mute = t.text_list("mute_keywords", ())
+    defaults = GroupConfig(wake_keywords=wake, mute_keywords=mute)
+    group = GroupConfig(
+        wake_keywords=wake,
+        mute_keywords=mute,
+        idle_timeout_seconds=t.positive_number_or(
+            "idle_timeout_seconds", defaults.idle_timeout_seconds
+        ),
+        max_turns=t.positive_int_or("max_turns", defaults.max_turns),
+        skill_topics=t.positive_int_or("skill_topics", defaults.skill_topics),
+        skill_memes=t.positive_int_or("skill_memes", defaults.skill_memes),
+        skill_rules=t.positive_int_or("skill_rules", defaults.skill_rules),
+        skill_members=t.positive_int_or("skill_members", defaults.skill_members),
+        skill_habits_per_member=t.positive_int_or(
+            "skill_habits_per_member", defaults.skill_habits_per_member
+        ),
+    )
     t.close()
-    return GroupConfig(wake_keywords=wake, mute_keywords=mute)
+    return group
 
 
 def _storage(t: _Table, base_dir: Path) -> StoragePaths:
@@ -248,6 +267,31 @@ class _Table:
         value = self._required(name)
         if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
             raise self.error(name, "须为正整数")
+        return value
+
+    def positive_int_or(self, name: str, default: int) -> int:
+        value = self._take(name)
+        if value is _MISSING:
+            return default
+        if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+            raise self.error(name, "须为正整数")
+        return value
+
+    def positive_number_or(self, name: str, default: float) -> float:
+        value = self._take(name)
+        if value is _MISSING:
+            return default
+        if isinstance(value, bool) or not isinstance(value, int | float) or value <= 0:
+            raise self.error(name, "须为正数")
+        return float(value)
+
+    def raw_table(self, name: str) -> dict[str, object] | None:
+        """Nested table kept raw for a module that validates its own keys (``voice``)."""
+        value = self._take(name)
+        if value is _MISSING:
+            return None
+        if not isinstance(value, dict):
+            raise self.error(name, "须为配置节(表)")
         return value
 
     def optional_qq(self, name: str) -> str | None:

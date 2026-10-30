@@ -4,7 +4,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Final, Literal
+from typing import TYPE_CHECKING, Final, Literal
+
+if TYPE_CHECKING:
+    # voice/config.py imports ConfigError from this module; a runtime import would be a cycle.
+    from cgbot.voice.config import VoiceConfig
 
 Scope = Literal["private", "group"]
 WireApi = Literal["responses", "chat"]
@@ -92,10 +96,17 @@ class ProviderConfig:
 
 @dataclass(frozen=True, slots=True)
 class GroupConfig:
-    """Keyword rules for group chat. Group gating itself lives in later milestones."""
+    """Group chat settings: keyword rules, session lifetime, and group skill-card limits."""
 
     wake_keywords: tuple[str, ...]
     mute_keywords: tuple[str, ...]
+    idle_timeout_seconds: float = 600.0  # [推论] group session ends after this much quiet
+    max_turns: int = 30  # [推论] group session ends after this many turns
+    skill_topics: int = 8  # [推论] skill-card limits (SkillLimits)
+    skill_memes: int = 10
+    skill_rules: int = 10
+    skill_members: int = 20
+    skill_habits_per_member: int = 5
 
 
 @dataclass(frozen=True, slots=True)
@@ -141,3 +152,4 @@ class Config:
     group: GroupConfig
     storage: StoragePaths
     logging: LoggingConfig
+    voice: VoiceConfig | None = None  # None: [voice] table absent, voice disabled

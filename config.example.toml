@@ -48,6 +48,29 @@ data_dir = "data"    # 相对本配置文件所在目录;运行时数据,不入�
 [group]
 wake_keywords = ["大肥鱼"]  # 唤醒关键词:@ 机器人且消息含关键词才唤醒
 mute_keywords = []          # 闭嘴关键词,默认为空(具体规则在群聊里程碑中确定)
+# 群聊会话与技能上限(默认值为推论,待实测调整)
+idle_timeout_seconds = 600  # 群会话空闲多少秒后结束
+max_turns = 30              # 单次群会话最多轮数
+skill_topics = 8            # 群技能:话题条数上限
+skill_memes = 10            # 群技能:梗条数上限
+skill_rules = 10            # 群技能:群规条数上限
+skill_members = 20          # 群技能:成员条数上限
+skill_habits_per_member = 5 # 每位成员的习惯条数上限
+
+# 语音(可选)。省略整节 = 语音关闭:私聊语音只记为 [语音],不注册 send_voice 工具。
+# 语音转写失败时私聊内容为 [语音识别失败]。
+# [voice]
+# ffmpeg = "ffmpeg"                 # 音频转换程序
+# media_timeout_seconds = 30
+# [voice.asr]                       # FunASR 守护进程;host/port 与 unix_path 二选一
+# host = "127.0.0.1"
+# port = 10095
+# language = "auto"
+# [voice.tts]                       # SoVITS 守护进程
+# host = "127.0.0.1"
+# port = 10096
+# language = "zh"
+# path_rules = [{ remote = "/远端数据目录", local = "/本机数据目录" }]
 
 [logging]
 level = "INFO"       # DEBUG / INFO / WARNING / ERROR / CRITICAL
