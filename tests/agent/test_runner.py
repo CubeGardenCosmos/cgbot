@@ -805,3 +805,42 @@ async def test_new_message_ids_must_match_items(store: AsyncSessionStore) -> Non
     with pytest.raises(ValueError):
         await runner.run_turn(ctx)
     assert await rows(store) == []
+
+
+async def test_on_response_observer_reports_usage_per_response(store: AsyncSessionStore) -> None:
+    seen: list[tuple[str, Usage]] = []
+    runner = AgentRunner(
+        provider=ScriptedProvider(text_resp("ok")),
+        store=store,
+        tools=builtin_tools(),
+        instructions="be brief",
+        sender=RecordingSender(),
+        on_response=lambda sid, usage, _seq: seen.append((sid, usage)),
+    )
+
+    await runner.run_turn(turn("hi"))
+
+    assert [sid for sid, _ in seen] == [SID]
+    assert isinstance(seen[0][1], Usage)
+
+
+async def test_async_instructions_resolve_per_session(store: AsyncSessionStore) -> None:
+    asked: list[str] = []
+
+    async def instructions(session_id: str) -> str:
+        asked.append(session_id)
+        return f"prompt for {session_id}"
+
+    provider = ScriptedProvider(text_resp("ok"))
+    runner = AgentRunner(
+        provider=provider,
+        store=store,
+        tools=builtin_tools(),
+        instructions=instructions,
+        sender=RecordingSender(),
+    )
+
+    await runner.run_turn(turn("hi"))
+
+    assert asked == [SID]
+    assert provider.requests[0].instructions == f"prompt for {SID}"

@@ -11,15 +11,17 @@ import json
 import sqlite3
 from collections.abc import AsyncIterator, Callable
 from pathlib import Path
-from typing import Any
+from types import SimpleNamespace
+from typing import Any, cast
 
 import pytest
 
-from cgbot.app import App, render_segments
+from cgbot.app import RECORD_FAILED, App, render_segments
 from cgbot.config import Config, load_config
 from cgbot.dispatch import QUIET_SECONDS
 from cgbot.model import Channel, InboundMessage, InputStatus, OutboundMessage, Segment, SendResult
 from cgbot.provider import FunctionCall, ModelRequest, ModelResponse, TextOutput, Usage
+from cgbot.scheduler.events import KIND_COMPACTION_IDLE, SystemEvent
 
 
 def _tables(path: Path) -> set[str]:
@@ -76,13 +78,7 @@ class FakeTimebase:
 
 
 def make_config(tmp_path: Path) -> Config:
-    secrets = tmp_path / "secrets.toml"
-    secrets.write_text('[secrets]\nprovider_api_key = "sk-test-APP"\n', encoding="utf-8")
-    secrets.chmod(0o600)
-    config_file = tmp_path / "config.toml"
-    data_dir = tmp_path / "data"
-    config_file.write_text(BASE_TOML + f'\n[storage]\ndata_dir = "{data_dir}"\n', encoding="utf-8")
-    return load_config(config_file, secrets, env={})
+    return make_config_extra(tmp_path, "")
 
 
 def private_msg(
@@ -367,11 +363,9 @@ async def test_app_wires_one_database_file_per_domain(tmp_path: Path) -> None:
     app = App(config, ScriptedProvider())
     try:
         data_dir = config.storage.data_dir
-        assert sorted(p.name for p in data_dir.glob("*.sqlite")) == [
-            "profile.sqlite",
-            "scheduler.sqlite",
-            "sessions.sqlite",
-        ]
+        names = {p.name for p in data_dir.glob("*.sqlite")}
+        assert {"profile.sqlite", "scheduler.sqlite", "sessions.sqlite"} <= names
+        assert "cgbot.sqlite" not in names
         assert not (data_dir / "cgbot.sqlite").exists()  # the old shared file is gone
         assert _tables(config.storage.profile) == {
             "identity_channels",
@@ -403,3 +397,230 @@ def _qq(account: str) -> Channel:
 @pytest.mark.parametrize("segments", [(), (Segment("reply", {"id": "1"}),)])
 def test_render_segments_empty_when_no_content(segments: tuple[Segment, ...]) -> None:
     assert render_segments(segments) == ""
+
+
+class FakeGate:
+    """Stands in for GroupGate: fixed decision; records context takes and bot speech."""
+
+    def __init__(self, action: str, context: tuple[Any, ...] = ()) -> None:
+        self.action = action
+        self.context = context
+        self.taken: list[str] = []
+        self.spoke: list[tuple[str, float, str | None]] = []
+
+    async def decide(self, message: InboundMessage) -> SimpleNamespace:
+        return SimpleNamespace(action=self.action)
+
+    def take_context(self, group_id: str) -> tuple[Any, ...]:
+        self.taken.append(group_id)
+        return self.context
+
+    def note_bot_spoke(self, group_id: str, at: float, message_id: str | None) -> None:
+        self.spoke.append((group_id, at, message_id))
+
+
+class FakeAsr:
+    def __init__(self, text: str = "", error: Exception | None = None) -> None:
+        self.text = text
+        self.error = error
+        self.received: list[bytes] = []
+
+    async def transcribe(self, wav: bytes, *, language: str | None = None) -> SimpleNamespace:
+        self.received.append(wav)
+        if self.error is not None:
+            raise self.error
+        return SimpleNamespace(text=self.text)
+
+
+class FakeMedia:
+    async def to_asr_wav(self, audio: bytes) -> bytes:
+        return b"RIFF" + audio
+
+
+def group_msg(message_id: str = "g1") -> InboundMessage:
+    return InboundMessage(
+        message_id=message_id,
+        scope="group",
+        user_id=IN_SCOPE,
+        group_id="2001",
+        segments=(Segment("text", {"text": "大家好"}),),
+        time=1.0,
+        reply_to=None,
+    )
+
+
+def install_voice(app: App, asr: FakeAsr) -> None:
+    voice = SimpleNamespace(asr=asr, tts=None, media=FakeMedia(), services=())
+    app._voice = cast(Any, voice)  # noqa: SLF001 - test injects fake voice clients
+
+
+def install_record_file(app: App, path: Path) -> None:
+    async def fake_call(action: str, *_args: Any, **_kwargs: Any) -> dict[str, Any]:
+        assert action == "get_record"
+        return {"data": {"file": str(path)}}
+
+    app.napcat.call = fake_call  # type: ignore[method-assign]
+
+
+async def test_private_turn_registers_memory_tools(tmp_path: Path) -> None:
+    clock = FakeTimebase()
+    provider = ScriptedProvider(*reply_script("好的"))
+    app = App(make_config(tmp_path), provider, timebase=clock)
+    install(app, Recorder())
+
+    await app.handle_message(private_msg("m1", IN_SCOPE, "记住我喜欢猫"))
+    await settle(app, clock)
+
+    tools = json.dumps(provider.requests[0].tools)
+    assert "memory_add" in tools
+    assert "memory_search" in tools
+    assert "memory_forget" in tools
+    assert "send_voice" not in tools  # no [voice] table: voice disabled
+    await app.stop()
+
+
+async def test_send_voice_tool_registered_only_when_voice_enabled(tmp_path: Path) -> None:
+    clock = FakeTimebase()
+    provider = ScriptedProvider(*reply_script("好的"))
+    app = App(make_config_extra(tmp_path, "\n[voice]\n"), provider, timebase=clock)
+    install(app, Recorder())
+
+    await app.handle_message(private_msg("m1", IN_SCOPE, "你好"))
+    await settle(app, clock)
+
+    assert "send_voice" in json.dumps(provider.requests[0].tools)
+    await app.stop()
+
+
+async def test_group_wake_hands_buffered_context_to_handle(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    app = App(make_config(tmp_path), ScriptedProvider(), timebase=FakeTimebase())
+    gate = FakeGate("wake", context=("ctx-1", "ctx-2"))
+    monkeypatch.setattr(app, "_group_gate", lambda: gate)
+    calls: list[tuple[str, tuple[Any, ...]]] = []
+
+    async def fake_handle(
+        message: InboundMessage, trigger: str, buffered: tuple[Any, ...] = ()
+    ) -> None:
+        calls.append((trigger, tuple(buffered)))
+
+    monkeypatch.setattr(app._groups, "handle", fake_handle)  # noqa: SLF001
+    await app.handle_message(group_msg())
+    await asyncio.gather(*list(app._tasks))  # noqa: SLF001
+
+    assert gate.taken == ["2001"]
+    assert calls == [("wake", ("ctx-1", "ctx-2"))]
+    await app.stop()
+
+
+async def test_group_mute_trigger_calls_manager_mute(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    app = App(make_config(tmp_path), ScriptedProvider(), timebase=FakeTimebase())
+    monkeypatch.setattr(app, "_group_gate", lambda: FakeGate("mute_triggered"))
+    muted: list[str] = []
+
+    async def fake_mute(group_id: str) -> None:
+        muted.append(group_id)
+
+    monkeypatch.setattr(app._groups, "mute", fake_mute)  # noqa: SLF001
+    await app.handle_message(group_msg())
+    await asyncio.gather(*list(app._tasks))  # noqa: SLF001
+
+    assert muted == ["2001"]
+    await app.stop()
+
+
+async def test_group_send_notifies_gate_of_bot_speech(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    app = App(make_config(tmp_path), ScriptedProvider(), timebase=FakeTimebase())
+    gate = FakeGate("none")
+    monkeypatch.setattr(app, "_gate", gate)
+    install(app, Recorder())
+
+    result = await app._send_group(  # noqa: SLF001
+        OutboundMessage(
+            scope="group",
+            target_id="2001",
+            segments=(Segment("text", {"text": "嗨"}),),
+        )
+    )
+
+    assert result.ok
+    assert [(gid, mid) for gid, _at, mid in gate.spoke] == [("2001", "out-1")]
+    await app.stop()
+
+
+async def test_idle_compaction_event_is_routed_to_compactor(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    app = App(make_config(tmp_path), ScriptedProvider(), timebase=FakeTimebase())
+    seen: list[str] = []
+
+    async def fake_idle(event: SystemEvent) -> SimpleNamespace:
+        seen.append(event.event_id)
+        return SimpleNamespace(status="skipped")
+
+    monkeypatch.setattr(app._compactor, "handle_idle_event", fake_idle)  # noqa: SLF001
+    event = SystemEvent(
+        event_id="idle-1",
+        kind=KIND_COMPACTION_IDLE,
+        user_id=IN_SCOPE,
+        payload={},
+        due_at=0.0,
+    )
+    await app._on_system_event(event)  # noqa: SLF001
+    await asyncio.gather(*app._tasks)  # noqa: SLF001
+    assert seen == ["idle-1"]
+    await app.stop()
+
+
+async def test_private_record_is_transcribed_into_turn_text(tmp_path: Path) -> None:
+    app = App(make_config(tmp_path), ScriptedProvider(), timebase=FakeTimebase())
+    audio = tmp_path / "voice.silk"
+    audio.write_bytes(b"silk")
+    asr = FakeAsr(text="你好呀")
+    install_voice(app, asr)
+    install_record_file(app, audio)
+
+    text = await app._render_private((Segment("record", {"file": "f.silk"}),))  # noqa: SLF001
+
+    assert text == "[语音转写: 你好呀]"
+    assert asr.received == [b"RIFFsilk"]
+    await app.stop()
+
+
+async def test_private_record_asr_failure_gives_placeholder(tmp_path: Path) -> None:
+    app = App(make_config(tmp_path), ScriptedProvider(), timebase=FakeTimebase())
+    audio = tmp_path / "voice.silk"
+    audio.write_bytes(b"silk")
+    install_voice(app, FakeAsr(error=RuntimeError("asr down")))
+    install_record_file(app, audio)
+
+    text = await app._render_private((Segment("record", {"file": "f.silk"}),))  # noqa: SLF001
+
+    assert text == RECORD_FAILED
+    await app.stop()
+
+
+async def test_private_record_without_voice_is_plain_placeholder(tmp_path: Path) -> None:
+    app = App(make_config(tmp_path), ScriptedProvider(), timebase=FakeTimebase())
+
+    text = await app._render_private((Segment("record", {"file": "f.silk"}),))  # noqa: SLF001
+
+    assert text == "[语音]"
+    await app.stop()
+
+
+def make_config_extra(tmp_path: Path, extra: str) -> Config:
+    secrets = tmp_path / "secrets.toml"
+    secrets.write_text('[secrets]\nprovider_api_key = "sk-test-APP"\n', encoding="utf-8")
+    secrets.chmod(0o600)
+    config_file = tmp_path / "config.toml"
+    data_dir = tmp_path / "data"
+    config_file.write_text(
+        BASE_TOML + f'\n[storage]\ndata_dir = "{data_dir}"\n' + extra, encoding="utf-8"
+    )
+    return load_config(config_file, secrets, env={})

@@ -45,6 +45,7 @@ from cgbot.provider import (
     ModelRequest,
     ModelResponse,
     ProviderError,
+    Usage,
     item_from_output,
 )
 from cgbot.session import AsyncSessionStore, Kind
@@ -53,6 +54,8 @@ log = logging.getLogger(__name__)
 
 Sender = Callable[[OutboundMessage], Awaitable[SendResult]]
 TurnStatus = Literal["completed", "cancelled", "failed"]
+ResponseObserver = Callable[[str, Usage, int], None]
+InstructionsSource = str | Callable[[str], Awaitable[str]]
 
 
 @dataclass(frozen=True, slots=True)
@@ -104,9 +107,10 @@ class AgentRunner:
         provider: ModelProvider,
         store: AsyncSessionStore,
         tools: ToolRegistry,
-        instructions: str,
+        instructions: InstructionsSource,
         sender: Sender,
         reasoning_effort: str | None = None,
+        on_response: ResponseObserver | None = None,
     ) -> None:
         self._provider = provider
         self._store = store
@@ -114,6 +118,7 @@ class AgentRunner:
         self._instructions = instructions
         self._sender = sender
         self._reasoning_effort = reasoning_effort
+        self._on_response = on_response
         self._turns: dict[str, _Turn] = {}
 
     async def run_turn(self, ctx: TurnContext) -> TurnResult:
@@ -212,9 +217,15 @@ class AgentRunner:
 
         while True:
             await self._flush_injected(ctx, turn)
+            items = await self._store.load_active(ctx.session_id)
+            instructions = (
+                self._instructions
+                if isinstance(self._instructions, str)
+                else await self._instructions(ctx.session_id)
+            )
             request = ModelRequest(
-                instructions=self._instructions,
-                input=await self._load_input(ctx.session_id),
+                instructions=instructions,
+                input=to_input_items(items),
                 tools=self._tools.schemas(channels),
                 reasoning_effort=self._reasoning_effort,
             )
@@ -224,6 +235,8 @@ class AgentRunner:
                 await self._record_model_failure(ctx, exc)
                 return TurnResult("failed", turn.tool_called, turn.replies_sent, _describe(exc))
 
+            if self._on_response is not None:
+                self._on_response(ctx.session_id, response.usage, items[-1].seq if items else 0)
             calls = await self._persist_response(ctx, turn, response)
             if not calls:
                 if turn.injected:
@@ -328,9 +341,6 @@ class AgentRunner:
             item, message_id = turn.injected[0]
             await self._append_item(ctx.session_id, "user", item, {"message_id": message_id})
             turn.injected.pop(0)
-
-    async def _load_input(self, session_id: str) -> list[dict[str, Any]]:
-        return to_input_items(await self._store.load_active(session_id))
 
     async def _record_model_failure(self, ctx: TurnContext, exc: Exception) -> None:
         status = exc.status if isinstance(exc, ProviderError) else None

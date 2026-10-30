@@ -139,6 +139,13 @@ class GroupGate:
     def recent_context(self, group_id: str) -> tuple[BufferedMessage, ...]:
         return self._store.buffer(group_id)
 
+    def take_context(self, group_id: str) -> tuple[BufferedMessage, ...]:
+        """Buffered unhandled messages, cleared: they now belong to a turn. Synchronous, so no
+        message can arrive between reading and clearing."""
+        context = self._store.buffer(group_id)
+        self._store.clear_buffer(group_id)
+        return context
+
     def _decide(self, msg: InboundMessage, group_id: str) -> GateDecision:
         now = self._clock()
         if not self._scope.allows("group", msg.user_id, group_id):

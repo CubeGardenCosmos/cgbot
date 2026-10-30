@@ -92,6 +92,12 @@ class NapCatServer:
             raise NotConnectedError("server not started")
         return int(self._server.sockets[0].getsockname()[1])
 
+    @property
+    def self_id(self) -> str | None:
+        """QQ account id of the primary NapCat connection, or None if not connected."""
+        session = self._primary()
+        return None if session is None else session.self_id
+
     async def start(self) -> None:
         if self._server is not None:
             raise RuntimeError("NapCatServer already started")

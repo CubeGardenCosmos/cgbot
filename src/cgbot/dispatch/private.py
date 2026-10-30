@@ -18,10 +18,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
 
-from cgbot.agent import AgentRunner, TurnContext
+from cgbot.agent import AgentRunner, TurnContext, TurnResult
 from cgbot.dispatch.timebase import SystemTimebase, Timebase
 from cgbot.model import Channel
 
@@ -55,11 +56,18 @@ class _Lane:
 class PrivateDispatcher:
     """Decides when private turns start and how new messages reach the running turn."""
 
-    def __init__(self, runner: AgentRunner, timebase: Timebase | None = None) -> None:
+    def __init__(
+        self,
+        runner: AgentRunner,
+        timebase: Timebase | None = None,
+        *,
+        on_turn_done: Callable[[str, TurnResult], Awaitable[None]] | None = None,
+    ) -> None:
         self._runner = runner
         self._time: Timebase = timebase if timebase is not None else SystemTimebase()
         self._lanes: dict[str, _Lane] = {}
         self._closing = False
+        self._on_turn_done = on_turn_done
 
     def on_typing(self, session_id: str) -> None:
         """An input_status push for this session. Any push counts, including empty status text.
@@ -150,3 +158,12 @@ class PrivateDispatcher:
             result.tool_called,
             result.replies_sent,
         )
+        if self._on_turn_done is not None:
+            try:
+                await self._on_turn_done(lane.session_id, result)
+            except Exception as exc:
+                log.error(
+                    "turn-done hook failed: session=%s error=%s",
+                    lane.session_id,
+                    type(exc).__name__,
+                )
