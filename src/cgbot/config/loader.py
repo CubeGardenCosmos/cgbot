@@ -100,6 +100,7 @@ def _provider(t: _Table, source: _SecretSource) -> ProviderConfig:
     if not base_url.startswith(("http://", "https://")):
         raise t.error("base_url", "须以 http:// 或 https:// 开头")
     model = t.text("model")
+    context_window = t.positive_int("context_window")
     api_key = source.resolve(t.text("api_key_ref"), t.key("api_key_ref"))
 
     defaults = ReasoningTiers()
@@ -112,7 +113,13 @@ def _provider(t: _Table, source: _SecretSource) -> ProviderConfig:
     )
     tiers.close()
     t.close()
-    return ProviderConfig(base_url=base_url, model=model, api_key=api_key, reasoning=reasoning)
+    return ProviderConfig(
+        base_url=base_url,
+        model=model,
+        context_window=context_window,
+        api_key=api_key,
+        reasoning=reasoning,
+    )
 
 
 def _group(t: _Table) -> GroupConfig:
@@ -226,6 +233,12 @@ class _Table:
         value = self._required(name)
         if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= 65535:
             raise self.error(name, "须为 1–65535 的整数")
+        return value
+
+    def positive_int(self, name: str) -> int:
+        value = self._required(name)
+        if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+            raise self.error(name, "须为正整数")
         return value
 
     def optional_qq(self, name: str) -> str | None:

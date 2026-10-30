@@ -19,6 +19,7 @@ port = 6199
 [provider]
 base_url = "https://up.example/v1"
 model = "model-x"
+context_window = 128000
 api_key_ref = "provider_api_key"
 
 [scope]
@@ -69,6 +70,7 @@ def test_valid_load_applies_defaults_and_reads_values(tmp_path: Path, secrets_fi
     assert cfg.scope.groups == frozenset({"2001"})
     assert cfg.provider.base_url == "https://up.example/v1"
     assert cfg.provider.model == "model-x"
+    assert cfg.provider.context_window == 128000
     assert cfg.provider.api_key.reveal() == SECRET_VALUE
     assert cfg.provider.reasoning.summary == "low"
     assert cfg.provider.reasoning.private == "high"
@@ -146,6 +148,7 @@ def test_token_ref_resolves_secret(tmp_path: Path) -> None:
         ("[napcat]\nport = 6199\n", "napcat"),
         ('base_url = "https://up.example/v1"\n', "provider.base_url"),
         ('model = "model-x"\n', "provider.model"),
+        ("context_window = 128000\n", "provider.context_window"),
         ('api_key_ref = "provider_api_key"\n', "provider.api_key_ref"),
     ],
 )
@@ -179,6 +182,11 @@ def test_missing_provider_section_is_named(tmp_path: Path, secrets_file: Path) -
         ("groups = [2001]", "groups = [-5]", "scope.groups[0]"),
         ('base_url = "https://up.example/v1"', 'base_url = "ftp://x"', "provider.base_url"),
         ('model = "model-x"', 'model = ""', "provider.model"),
+        ("context_window = 128000", "context_window = 0", "provider.context_window"),
+        ("context_window = 128000", "context_window = -1", "provider.context_window"),
+        ("context_window = 128000", "context_window = true", "provider.context_window"),
+        ("context_window = 128000", 'context_window = "128000"', "provider.context_window"),
+        ("context_window = 128000", "context_window = 1.5", "provider.context_window"),
         ("[provider]", "[provider]\nreasoning = 3", "provider.reasoning"),
     ],
 )

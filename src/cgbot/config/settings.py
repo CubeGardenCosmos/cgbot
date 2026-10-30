@@ -82,6 +82,7 @@ class ProviderConfig:
 
     base_url: str
     model: str
+    context_window: int
     api_key: Secret
     reasoning: ReasoningTiers
 

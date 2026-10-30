@@ -27,6 +27,7 @@ groups = []          # 固定群号,纯数字
 [provider]
 base_url = "https://example.invalid/v1"  # OpenAI Responses 兼容上游;请求 {base_url}/responses
 model = "your-model-name"
+context_window = 128000             # 上游模型上下文窗口,token 数,正整数,必填
 api_key_ref = "provider_api_key"         # 密钥引用名,值见文件头说明
 
 [provider.reasoning]

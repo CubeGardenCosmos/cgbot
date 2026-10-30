@@ -6,7 +6,8 @@ File format (see ``config.example.toml`` at the repo root for a commented copy):
   ``token_ref`` (optional secret name; omitted means no token check).
 - ``[scope]``: ``friends`` and ``groups`` (QQ ids, default empty = deny all), ``owner``
   (optional identity marker, does not extend the allowlist).
-- ``[provider]``: ``base_url`` (http/https), ``model``, ``api_key_ref`` (required secret name);
+- ``[provider]``: ``base_url`` (http/https), ``model``, ``context_window`` (positive int, required),
+  ``api_key_ref`` (required secret name);
   ``[provider.reasoning]`` tiers ``summary`` (low), ``private`` (high), ``planning`` (max),
   ``group`` (low), passed through to the upstream.
 - ``[storage]``: ``data_dir`` (default ``data``, relative to the config file's directory).
