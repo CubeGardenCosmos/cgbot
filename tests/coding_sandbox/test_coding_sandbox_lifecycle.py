@@ -372,7 +372,7 @@ async def test_unmanaged_container_with_expected_name_is_refused(tmp_path: Path)
 
 @pytest.mark.parametrize(
     "bad",
-    ["", "abc", "12a", " 1001", "-1", "../1001", "1001;rm", "1" * 21, "\uff11\uff10\uff10\uff11"],
+    ["", " 1001", "../1001", "1001;rm", "a" * 65, "\uff11\uff10\uff10\uff11", "a/b"],
 )
 async def test_invalid_user_id_is_rejected_before_any_docker_call(tmp_path: Path, bad: str):
     config = make_config(tmp_path)

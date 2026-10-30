@@ -44,7 +44,7 @@ NANO_CPUS = 2_000_000_000
 CPU_SHARES = 2
 TMPFS_TMP = "rw,exec,nosuid,nodev,size=256m"
 
-_USER_ID = re.compile(r"[0-9]{1,20}")
+_USER_ID = re.compile(r"[A-Za-z0-9_-]{1,64}")
 _PREFIX = re.compile(r"[a-zA-Z0-9][a-zA-Z0-9_.-]*")
 
 
@@ -364,7 +364,7 @@ class DockerSandboxProvider:
 
 
 def validate_user_id(user_id: str) -> str:
-    """Return ``user_id`` unchanged if it is a plain decimal id; otherwise raise."""
+    """Return ``user_id`` unchanged if it is a path-safe internal id; otherwise raise."""
     if not isinstance(user_id, str) or not _USER_ID.fullmatch(user_id):
-        raise InvalidUserId("user id must be 1-20 decimal digits")
+        raise InvalidUserId("user id must be 1-64 characters of [A-Za-z0-9_-]")
     return user_id

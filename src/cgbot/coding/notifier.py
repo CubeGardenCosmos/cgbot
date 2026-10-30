@@ -93,17 +93,26 @@ def model_text(notice: CodingNotice, delivered: bool) -> str:
 class QqNotifier:
     """Sends notices to the owning user's private chat and records them in session history."""
 
-    def __init__(self, send: Sender, sessions: AsyncSessionStore) -> None:
+    def __init__(
+        self,
+        send: Sender,
+        sessions: AsyncSessionStore,
+        target_of: Callable[[str], Awaitable[str]] | None = None,
+    ) -> None:
         self._send = send
         self._sessions = sessions
+        self._target_of = target_of  # internal user id -> QQ account; default: identical
 
     async def notify(self, notice: CodingNotice) -> None:
         delivered = False
         try:
+            target = notice.user_id
+            if self._target_of is not None:
+                target = await self._target_of(notice.user_id)
             result = await self._send(
                 OutboundMessage(
                     scope="private",
-                    target_id=notice.user_id,
+                    target_id=target,
                     segments=render_notice(notice),
                 )
             )
