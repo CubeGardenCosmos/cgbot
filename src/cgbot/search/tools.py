@@ -8,7 +8,7 @@ failures carry a stable code followed by a neutral explanation, never a remote b
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from cgbot.agent.tools import ToolContext, ToolResult, ToolSpec
 from cgbot.config.settings import SearchGeminiConfig
@@ -29,6 +29,9 @@ from cgbot.search.models import (
     SearchOutcome,
 )
 from cgbot.search.service import ENGINE_LABELS, MAX_QUERY_CHARS, SearchService
+
+if TYPE_CHECKING:
+    from cgbot.search.gemini import GeminiSearchClient
 
 MAX_SNIPPET_CHARS = 200
 
@@ -179,7 +182,9 @@ def web_search_tool(service: SearchService, *, with_gemini: bool) -> ToolSpec:
     )
 
 
-def _default_gemini_factory(config: SearchGeminiConfig) -> ToolSpec:
+def _default_gemini_factory(
+    config: SearchGeminiConfig, *, client: GeminiSearchClient | None = None
+) -> ToolSpec:
     # Imported lazily: the Gemini relay client is only needed when [search.gemini] is enabled.
     from cgbot.search.gemini import gemini_search_tool
 
@@ -190,6 +195,7 @@ def _default_gemini_factory(config: SearchGeminiConfig) -> ToolSpec:
         config.token.reveal(),
         model=config.model,
         timeout=config.timeout_seconds,
+        client=client,
     )
 
 
@@ -197,11 +203,14 @@ def search_tools(
     service: SearchService,
     *,
     gemini_factory: GeminiFactory | None = None,
+    gemini_client: GeminiSearchClient | None = None,
 ) -> list[ToolSpec]:
     """``web_search`` plus ``gemini_search`` when ``[search.gemini]`` is enabled."""
     gemini = service.config.gemini
     specs = [web_search_tool(service, with_gemini=gemini.enabled)]
     if gemini.enabled:
-        factory = gemini_factory or _default_gemini_factory
-        specs.append(factory(gemini))
+        if gemini_factory is not None:
+            specs.append(gemini_factory(gemini))
+        else:
+            specs.append(_default_gemini_factory(gemini, client=gemini_client))
     return specs

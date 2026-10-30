@@ -178,7 +178,7 @@ def _interpret(response: httpx.Response) -> GeminiAnswer:
     return _fail("E_HTTP")
 
 
-def _format_for_model(result: GeminiAnswer) -> str:
+def format_answer(result: GeminiAnswer) -> str:
     answer = result.answer
     if len(answer) > MAX_ANSWER_CHARS:
         answer = answer[:MAX_ANSWER_CHARS] + "…"
@@ -206,18 +206,23 @@ def gemini_search_tool(
     model: str,
     timeout: float,
     http_factory: HttpFactory = default_http_factory,
+    client: GeminiSearchClient | None = None,
 ) -> ToolSpec:
     """``gemini_search`` 工具。``endpoint`` 为 relay 的完整 URL,如 ``http://host.docker.internal:8791/search``。"""
-    client = GeminiSearchClient(endpoint, token, model, timeout, http_factory=http_factory)
+    bound_client = client
+    if bound_client is None:
+        bound_client = GeminiSearchClient(
+            endpoint, token, model, timeout, http_factory=http_factory
+        )
     allowed = {"query", "recency"}
 
     async def handler(ctx: ToolContext, args: dict[str, Any]) -> ToolResult:
         unknown = sorted(set(args) - allowed)
         if unknown:
             return ToolResult(output=f"unknown argument(s): {', '.join(unknown)}", is_error=True)
-        result = await client.search(args.get("query", ""), args.get("recency"))
+        result = await bound_client.search(args.get("query", ""), args.get("recency"))
         if result.ok:
-            return ToolResult(output=_format_for_model(result), is_error=False)
+            return ToolResult(output=format_answer(result), is_error=False)
         code = result.code or "E_HTTP"
         return ToolResult(output=f"{code}: {ERROR_MESSAGES[code]}", is_error=True)
 

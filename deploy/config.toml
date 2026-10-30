@@ -48,7 +48,10 @@ engines = ["bing", "baidu", "bilibili"]
 timeout_seconds = 30
 
 [search.gemini]
-enabled = false                           # 启用前需宿主机 omp-search-relay 运行并配置 token_ref
+enabled = true                            # 宿主机 omp-search-relay(systemd 用户服务,端口 8791)
+endpoint = "http://host.docker.internal:8791/search"
+token_ref = "gemini_search_token"
+model = "gemini-2.5-flash"
 
 [logging]
 level = "INFO"

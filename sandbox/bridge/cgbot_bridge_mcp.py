@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """cgbot bridge: in-sandbox MCP server (stdio, newline-delimited JSON-RPC) launched by Codex.
 
-Tools: ``report_progress``, ``send_file``, ``generate_image``. Each talks to the bot's ``/bridge``
-HTTP API; file bytes travel through the chunked upload pipeline, never fully buffered.
+Tools: ``report_progress``, ``send_file``, ``generate_image``, ``web_search``, ``gemini_search``.
+Each talks to the bot's ``/bridge`` HTTP API; file bytes travel through the chunked upload
+pipeline, never fully buffered.
 
 Environment:
     CGBOT_BRIDGE_URL            required, e.g. ``http://cgbot:8000/bridge``
@@ -38,6 +39,9 @@ MAX_REFERENCE_IMAGES = 8
 HASH_BLOCK_BYTES = 1024 * 1024
 REQUEST_TIMEOUT_SECONDS = 60.0
 IMAGEGEN_TIMEOUT_SECONDS = 900.0
+SEARCH_TIMEOUT_SECONDS = 120.0
+GEMINI_SEARCH_TIMEOUT_SECONDS = 180.0
+SEARCH_FRESHNESS = ("day", "week", "month", "year")
 CHUNK_ATTEMPTS = 3
 CHUNK_RETRY_DELAYS: tuple[float, ...] = (0.5, 1.0)
 ERROR_SNIPPET_CHARS = 200
@@ -55,7 +59,8 @@ META_PROTOCOL_KEY = "io.modelcontextprotocol/protocolVersion"
 SERVER_INFO = {"name": "cgbot-bridge", "version": "1.0.0"}
 INSTRUCTIONS = (
     "cgbot bridge: report_progress and send_file deliver messages and files to the user; "
-    "generate_image creates images. Paths must be absolute files under /workspace or /home/agent."
+    "generate_image creates images; web_search and gemini_search search through the bot. "
+    "Paths must be absolute files under /workspace or /home/agent."
 )
 
 PARSE_ERROR = -32700
@@ -387,6 +392,38 @@ def _generate_image(client: BridgeClient, args: dict[str, Any], thread_id: str |
     return client.post_text("/imagegen", payload, IMAGEGEN_TIMEOUT_SECONDS)
 
 
+def _web_search(client: BridgeClient, args: dict[str, Any], thread_id: str | None) -> str:
+    payload: dict[str, Any] = {
+        "query": _str_arg(args, "query", required=True, max_chars=200)
+    }
+    engine = _str_arg(args, "engine")
+    if engine:
+        payload["engine"] = engine
+    if "count" in args:
+        count = args["count"]
+        if isinstance(count, bool) or not isinstance(count, int) or count < 1:
+            raise ToolError("invalid_argument", "count must be a positive integer")
+        payload["count"] = count
+    freshness = _str_arg(args, "freshness")
+    if freshness:
+        if freshness not in SEARCH_FRESHNESS:
+            raise ToolError("invalid_argument", "freshness must be day, week, month or year")
+        payload["freshness"] = freshness
+    return client.post_text("/search", payload, SEARCH_TIMEOUT_SECONDS)
+
+
+def _gemini_search(client: BridgeClient, args: dict[str, Any], thread_id: str | None) -> str:
+    payload: dict[str, Any] = {
+        "query": _str_arg(args, "query", required=True, max_chars=300)
+    }
+    recency = _str_arg(args, "recency")
+    if recency:
+        if recency not in SEARCH_FRESHNESS:
+            raise ToolError("invalid_argument", "recency must be day, week, month or year")
+        payload["recency"] = recency
+    return client.post_text("/gemini-search", payload, GEMINI_SEARCH_TIMEOUT_SECONDS)
+
+
 @dataclass(frozen=True, slots=True)
 class Tool:
     name: str
@@ -465,6 +502,41 @@ TOOLS: dict[str, Tool] = {
                 "required": ["prompt"],
             },
             _generate_image,
+        ),
+        Tool(
+            "web_search",
+            "Search the web through the bot's configured engines; returns source text and URLs.",
+            {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "minLength": 1, "maxLength": 200},
+                    "engine": {
+                        "type": "string",
+                        "description": "Optional configured engine name; omit for the bot default.",
+                    },
+                    "count": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "description": "Result count, subject to the bot's configured maximum.",
+                    },
+                    "freshness": {"type": "string", "enum": list(SEARCH_FRESHNESS)},
+                },
+                "required": ["query"],
+            },
+            _web_search,
+        ),
+        Tool(
+            "gemini_search",
+            "Search through the bot's Gemini backend; returns a grounded answer with sources.",
+            {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "minLength": 1, "maxLength": 300},
+                    "recency": {"type": "string", "enum": list(SEARCH_FRESHNESS)},
+                },
+                "required": ["query"],
+            },
+            _gemini_search,
         ),
     )
 }

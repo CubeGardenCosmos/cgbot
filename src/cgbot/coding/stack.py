@@ -24,9 +24,12 @@ from cgbot.coding.imagegen import ImageGenService, imagegen_routes
 from cgbot.coding.manager import CodingManager
 from cgbot.coding.queue_store import QueueStore
 from cgbot.coding.sandbox import DockerSandboxProvider
+from cgbot.coding.searchbridge import search_routes
 from cgbot.coding.tools import codex_tools
 from cgbot.coding.web import CodingWeb
 from cgbot.config.settings import Secret
+from cgbot.search import SearchService
+from cgbot.search.gemini import GeminiSearchClient
 
 log = logging.getLogger(__name__)
 
@@ -45,6 +48,8 @@ class CodingStack:
         notifier: CodingNotifier,
         queue_path: Path,
         clock: Clock = time.time,
+        search_service: SearchService | None = None,
+        gemini_client: GeminiSearchClient | None = None,
     ) -> None:
         auth = HmacSandboxAuth(config.token_secret)
         self._governor = ConcurrencyGovernor(config.concurrency, clock)
@@ -60,7 +65,11 @@ class CodingStack:
             upstream_base_url=upstream_base_url,
             upstream_api_key=upstream_api_key,
             status_hook=self._governor.on_upstream_status,
-            extra_routes=[*self._bridge.routes, *imagegen_routes(self._imagegen, auth)],
+            extra_routes=[
+                *self._bridge.routes,
+                *imagegen_routes(self._imagegen, auth),
+                *search_routes(search_service, gemini_client, auth),
+            ],
         )
         self.tools: tuple[ToolSpec, ...] = codex_tools(self._manager)
         self._started = False

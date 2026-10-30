@@ -359,7 +359,7 @@ async def test_modern_request_with_right_version_has_result_type(harness: Harnes
     assert ping["result"] == {"resultType": "complete"}
     listed = await proc.call("tools/list", {"_meta": {META: MODERN}}, request_id=2)
     assert listed["result"]["resultType"] == "complete"
-    assert len(listed["result"]["tools"]) == 3
+    assert len(listed["result"]["tools"]) == 5
     await proc.close()
 
 
@@ -385,7 +385,13 @@ async def test_notifications_get_no_response(harness: Harness) -> None:
 async def test_tools_list_names_and_schemas(harness: Harness) -> None:
     proc = await spawn(harness)
     tools = {tool["name"]: tool for tool in (await proc.call("tools/list"))["result"]["tools"]}
-    assert set(tools) == {"report_progress", "send_file", "generate_image"}
+    assert set(tools) == {
+        "report_progress",
+        "send_file",
+        "generate_image",
+        "web_search",
+        "gemini_search",
+    }
     for tool in tools.values():
         assert tool["description"]
         assert tool["inputSchema"]["type"] == "object"

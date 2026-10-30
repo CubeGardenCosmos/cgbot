@@ -15,6 +15,8 @@ from cgbot.search.gemini import (
     ERROR_MESSAGES,
     GeminiAnswer,
     GeminiSearchClient,
+    GeminiSource,
+    format_answer,
     gemini_search_tool,
 )
 
@@ -229,6 +231,46 @@ async def test_tool_formats_success_for_model() -> None:
     assert "2. 未命名来源" in result.output
     assert TOKEN not in result.output
     assert ENDPOINT not in result.output
+
+
+def test_public_formatter_preserves_model_output_and_limits() -> None:
+    answer = GeminiAnswer(
+        ok=True,
+        answer="a" * 1501,
+        sources=tuple(
+            GeminiSource(f"来源{index}", f"https://{index}.example/") for index in range(6)
+        ),
+    )
+    assert format_answer(answer) == "\n".join(
+        [
+            "Google 来源的 AI 搜索结果。",
+            "回答:",
+            "a" * 1500 + "…",
+            "来源:",
+            *(f"{index + 1}. 来源{index} https://{index}.example/" for index in range(5)),
+        ]
+    )
+
+
+async def test_tool_uses_supplied_shared_client() -> None:
+    seen, handler = _counting(
+        lambda _r: _json(200, {"ok": True, "answer": "共享回答", "sources": []})
+    )
+    client = _client(handler)
+    tool = gemini_search_tool(
+        ENDPOINT,
+        TOKEN,
+        model=MODEL,
+        timeout=5.0,
+        client=client,
+    )
+
+    result = await tool.handler(_ctx(), {"query": "共享查询", "recency": "week"})
+
+    assert result.output == format_answer(GeminiAnswer(ok=True, answer="共享回答"))
+    assert not result.is_error
+    assert len(seen) == 1
+    assert json.loads(seen[0].content)["query"] == "共享查询"
 
 
 async def test_tool_refusal_is_polite_error() -> None:
