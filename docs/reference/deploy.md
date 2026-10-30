@@ -95,3 +95,11 @@ deploy/deploy.sh --rollback <tag>   # 切换到已存在的 cgbot:<tag> 并重�
 - 未执行 `compose up`:真实 NapCat 连入、coding 服务 `/healthz`(当前容器 HEALTHCHECK 预期失败)、沙盒并发内存、`context_window` 实际值。
 - Docker 代理白名单是否满足 M5 manager 的全部调用(`/images/*`、logs、wait 未在旧 haproxy 白名单中)。
 - 容器内 `/healthz` 与 `bridge` 端到端路径未测,依赖 slice A/D/E。
+
+## 10. omp 搜索 relay(宿主机,未部署)
+
+`gemini_search` 工具的宿主机侧守护进程,安装与运维步骤见 [deploy/README.md](../../deploy/README.md) 的「omp 搜索 relay」一节。
+容器经 `host.docker.internal:8791/search` 访问,令牌只在 bot 进程内。
+
+- 仓库内只提供脚本与单元示例;在 192.168.1.19 上的安装与启用需人工执行,未在本次工作中执行。
+- 未验证项:真实 `omp search` 的 TUI 输出格式(当前解析器按 omp 渲染器源码与手工构造的样例测试);relay 在 .19 的实际运行。
