@@ -36,6 +36,7 @@ services:
       - ./state:/app/data
       # Sandbox bind mounts are resolved by the HOST Docker daemon, so the path must match.
       - ${HOST_DATA_DIR:-/home/klp/cgbot-data}:${HOST_DATA_DIR:-/home/klp/cgbot-data}
+    extra_hosts: ["host.docker.internal:host-gateway"]   # imagegen proxy on the host (as the old manager)
     networks:
       - dsh_caged_internal         # sandboxes reach http://cgbot:8000 (gateway/bridge)
       - dsh_caged_ctl              # reaches dsh-docker-proxy:2375 (Docker API allowlist)
