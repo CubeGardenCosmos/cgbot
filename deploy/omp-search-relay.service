@@ -9,6 +9,8 @@ Description=omp search relay (Gemini grounding search for cgbot)
 Documentation=file://%h/cgbot/deploy/README.md
 After=network-online.target
 Wants=network-online.target
+StartLimitIntervalSec=300
+StartLimitBurst=5
 
 [Service]
 Type=simple
@@ -23,8 +25,6 @@ ExecStart=/usr/bin/python3 %h/cgbot/deploy/omp-search-relay.py \
 # 退出码非 0 或被杀才重启;显式 systemctl stop 不重启。
 Restart=on-failure
 RestartSec=5
-StartLimitIntervalSec=300
-StartLimitBurst=5
 TimeoutStopSec=100
 KillMode=control-group
 # omp 需要 node 与 bun 的 PATH;不要把令牌放进 Environment。
