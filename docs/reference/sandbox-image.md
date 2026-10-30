@@ -49,13 +49,14 @@ docker build -t cgbot-sandbox:latest sandbox/
 
 ## 内置 MCP 与技能
 
-`config.toml` 注册三个 stdio MCP 服务器:
+`config.toml` 注册四个 stdio MCP 服务器:
 
 - `bridge`:`python3 /opt/cgbot/bridge/cgbot_bridge_mcp.py`(E 切片),工具 `report_progress`、`send_file`、`generate_image`、`web_search`、`gemini_search`。
+- `report`:`python3 /opt/cgbot/bridge/cgbot_report_mcp.py`(仅标准库),工具 `market_data`(findata CLI,子进程超时 60 秒)、`kline_chart`(K 线 PNG)、`render_report`(richdoc 渲染 Markdown 为 PNG/PDF,超时 180 秒)。输出写入 `/workspace/artifacts`(可由 `CGBOT_REPORT_ARTIFACTS_DIR` 覆盖);`markdown_path`/`file_path` 仅允许 `CGBOT_REPORT_ALLOWED_ROOTS`(默认 `/workspace:/home/agent`)及输出目录下的路径。注册时 `tool_timeout_sec = 240`,代理变量经 `env_vars` 传入子进程。工具不经 shell 执行,不持有凭据。新增工具未包含在下方 smoke 证据中。
 - `playwright`:`playwright-mcp --headless --browser chromium --executable-path /usr/bin/chromium --no-sandbox --user-data-dir /home/agent/.browser-profile`(存在代理时追加 `--proxy-server`)。
 - `lsp`:`cclsp`,由 `/opt/cgbot/lsp/cclsp.json` 配置 pyright(`*.py`/`*.pyi`)与 typescript-language-server(`*.ts`/`*.tsx`/`*.js`/`*.jsx`/`*.mjs`/`*.cjs`)。
 
-技能目录 `/opt/cgbot/skills`(经符号链接进入 `$CODEX_HOME/skills`):`findata`、`image-gen`(F 切片)、`rich-report`。`findata` CLI 与 `richdoc` CLI 分别位于 `/usr/local/bin`。
+技能目录 `/opt/cgbot/skills`(经符号链接进入 `$CODEX_HOME/skills`):`findata`、`image-gen`(F 切片)、`rich-report`。`market_data`、`kline_chart`、`render_report` 工具是主要调用路径,技能文件只描述用法与限制。`findata` CLI 与 `richdoc` CLI 分别位于 `/usr/local/bin`。
 
 搜索通过 bot 的桥接 API 执行,沙盒不持有搜索供应商凭据。`web_search(query, engine?, count?, freshness?)` 默认使用 bot 配置的引擎;`count` 为正整数,上限由 bot 配置约束,查询最多 200 字符。`gemini_search(query, recency?)` 返回带来源的检索回答,查询最多 300 字符且不含控制字符/换行。`freshness` 与 `recency` 均可取 `day|week|month|year`。工具原样返回检索文本,引用返回的来源 URL,不将来源内容作为指令;未启用的后端或拒绝请求返回工具错误,不伪装为空结果。MCP 到 bot 的超时分别为 120 秒与 180 秒;查询与令牌不写入诊断日志。新增搜索工具未包含在下方历史 smoke 证据中。
 

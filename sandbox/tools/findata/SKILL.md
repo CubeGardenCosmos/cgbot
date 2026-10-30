@@ -7,6 +7,8 @@ description: Fetch normalized real CN/HK/US quotes, OHLCV, A-share breadth/secto
 
 Use this skill before researching stocks, indices, market conditions or funds. `findata` is preinstalled; do not rediscover quote endpoints with hand-written HTTP probes. Fetching is separate from the offline rich-report renderer.
 
+Prefer the `market_data` MCP tool over running the CLI yourself: `market_data(command, args?, out_path?)` runs this same CLI with a bounded timeout and output. For `kline` it writes the bars array to a file (`out_path` optional) and returns the path; pass that path to `kline_chart` `file_path`. The catalogue below lists the CLI arguments that `args` takes.
+
 ## Rules
 
 1. **Always obtain real OHLCV from findata for every K-line.** Never invent prices, volume, NAV, breadth or returns. If both sources fail, state the limitation, do not substitute a simulated chart. For stock/market reports include daily K-lines for every index/stock discussed (normally at least 60 bars).

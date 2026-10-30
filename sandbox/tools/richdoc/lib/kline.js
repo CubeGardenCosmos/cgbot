@@ -1,6 +1,10 @@
 const DEFAULT_PERIODS = [5, 10, 20, 60];
 const MA_COLORS = ['#b77900', '#7c3aed', '#2563eb', '#d97706'];
 const MAX_BARS = 500;
+const FORECAST_LABEL = '预测(非实测)';
+const FORECAST_LINE = '#4338ca';
+const FORECAST_BAND = '#e0e7ff';
+const MAX_FORECAST = 250;
 
 function escapeXml(value) {
   return String(value ?? '').replace(/[&<>"']/g, (character) => ({
@@ -117,7 +121,59 @@ function wrapLabel(value, available, size = 24) {
   return lines;
 }
 
-function headerLayout(options, width, averages) {
+const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+
+function calendarDay(value, name) {
+  const day = typeof value === 'string' && DATE_PATTERN.test(value) ? new Date(`${value}T00:00:00Z`) : null;
+  if (!day || Number.isNaN(day.getTime()) || day.toISOString().slice(0, 10) !== value) {
+    throw new Error(`forecast.${name} must be a valid YYYY-MM-DD date`);
+  }
+  return value;
+}
+
+// Validates the optional forecast: dashed, shaded, labelled, and always after the last measured bar.
+function normalizeForecast(value, bars) {
+  if (value === undefined || value === null) return null;
+  if (typeof value !== 'object' || Array.isArray(value)) throw new Error('forecast must be an object {label, start, end, series}');
+  if (!bars.length) throw new Error('forecast requires at least one valid bar');
+  const label = value.label === undefined ? FORECAST_LABEL : value.label;
+  if (typeof label !== 'string' || !label.includes('非实测')) throw new Error('forecast.label must be a string that contains 非实测');
+  const start = calendarDay(value.start, 'start');
+  const end = calendarDay(value.end, 'end');
+  if (end < start) throw new Error('forecast.end must not precede forecast.start');
+  const lastDay = String(bars.at(-1).date).slice(0, 10);
+  if (DATE_PATTERN.test(lastDay) && start <= lastDay) throw new Error(`forecast.start ${start} must be after the last bar ${lastDay}`);
+  if (!Array.isArray(value.series) || value.series.length < 1 || value.series.length > MAX_FORECAST) {
+    throw new Error(`forecast.series must hold 1-${MAX_FORECAST} values`);
+  }
+  const values = value.series.map((point, index) => {
+    const close = typeof point === 'number' ? point : point !== null && typeof point === 'object' ? point.close : undefined;
+    if (!Number.isFinite(close) || close < 0) throw new Error(`forecast.series[${index}] must be a finite non-negative close`);
+    return close;
+  });
+  return { label, start, end, values };
+}
+
+// Greedy placement: a label moves to the next row when its box would touch an earlier label.
+function forecastDates(bars, dateLabel, left, right, boundary, y, forecast) {
+  const items = [{ label: dateLabel(0), x: left, anchor: 'start' }];
+  if (bars.length > 1) items.push({ label: dateLabel(bars.length - 1), x: boundary, anchor: 'end' });
+  items.push({ label: `预测至 ${forecast.end}`, x: right, anchor: 'end' });
+  const occupied = [];
+  for (const item of items) {
+    item.rows = wrapLabel(item.label, right - left);
+    const width = Math.max(...item.rows.map((row) => textWidth(row)));
+    const start = item.anchor === 'end' ? item.x - width : item.x;
+    const end = item.anchor === 'end' ? item.x : item.x + width;
+    let row = 0;
+    while (occupied[row]?.some(([s, e]) => start < e + 16 && end + 16 > s)) row += 1;
+    (occupied[row] ??= []).push([start, end]);
+    item.y = y + row * 30;
+  }
+  return items;
+}
+
+function headerLayout(options, width, averages, forecast) {
   const available = width - 36;
   const title = typeof options.title === 'string' ? options.title : 'K线 / OHLCV';
   const symbol = typeof options.symbol === 'string' ? options.symbol : '';
@@ -138,6 +194,12 @@ function headerLayout(options, width, averages) {
       }
     }
   }
+  if (forecast) {
+    for (const value of wrapLabel(`${forecast.label}：${forecast.start} 至 ${forecast.end}，虚线与蓝紫底色标注预测区间，非实测数据`, available)) {
+      labels.push({ x: 18, y, value, role: 'forecast-legend', color: FORECAST_LINE });
+      y += 30;
+    }
+  }
   let x = 18;
   for (const [index, average] of averages.entries()) {
     const value = `MA${average.period} ${average.value === undefined ? '—' : formatPrice(average.value)}`;
@@ -155,6 +217,7 @@ export function buildKLineGeometry(data, options = {}) {
   const width = dimension(options.width, 540, 320, 2160);
   let height = dimension(options.height, 640, 480, 2160);
   const bars = normalizeBars(data);
+  const forecast = normalizeForecast(options.forecast, bars);
   const left = 18;
   if (!bars.length) {
     const header = headerLayout(options, width, []);
@@ -171,10 +234,13 @@ export function buildKLineGeometry(data, options = {}) {
     low = Math.min(low, bar.low);
     maxVolume = Math.max(maxVolume, bar.volume);
   }
+  // Forecast closes widen the price scale only; labels and dates still describe measured bars.
+  const scaleHigh = Math.max(high, ...(forecast ? forecast.values : []));
+  const scaleLow = Math.min(low, ...(forecast ? forecast.values : []));
   // Normalize before padding and averaging: even prices near Number.MAX_VALUE stay finite.
-  const priceUnit = high || 1;
-  const minNormalized = low / priceUnit;
-  const maxNormalized = high / priceUnit;
+  const priceUnit = scaleHigh || 1;
+  const minNormalized = scaleLow / priceUnit;
+  const maxNormalized = scaleHigh / priceUnit;
   const padding = Math.max((maxNormalized - minNormalized) * 0.08, maxNormalized * 0.015, 0.01);
   const scaleMin = Math.max(0, minNormalized - padding);
   const scaleMax = maxNormalized + padding;
@@ -197,7 +263,7 @@ export function buildKLineGeometry(data, options = {}) {
     }
     return { period, values, value: values.at(-1)?.value };
   });
-  const header = headerLayout(options, width, averages);
+  const header = headerLayout(options, width, averages, forecast);
   const top = header.top;
   // Long requested legends grow the SVG, never consume the candle panel.
   height = Math.max(height, top + 360);
@@ -208,7 +274,7 @@ export function buildKLineGeometry(data, options = {}) {
   const plot = { left, right, top, bottom, volumeTop, volumeBottom };
   const priceY = (price) => top + (scaleMax - price / priceUnit) / (scaleMax - scaleMin) * (bottom - top);
   ticks.forEach((tick, index) => { tick.y = top + (bottom - top) * index / 4; });
-  const step = (right - left) / bars.length;
+  const step = (right - left) / (bars.length + (forecast ? forecast.values.length : 0));
   const candleWidth = Math.max(0.35, Math.min(22, step * 0.68));
   const candles = bars.map((bar, index) => {
     const openY = priceY(bar.open);
@@ -223,6 +289,10 @@ export function buildKLineGeometry(data, options = {}) {
   const movingAverages = averages.map(({ period, values }) => ({
     period, points: values.map(({ index, value }) => ({ x: candles[index].x, y: priceY(value), value })),
   }));
+  // Forecast slots follow the measured bars on the same x-axis; their prices share the price scale.
+  const boundary = left + step * bars.length;
+  const forecastPoints = forecast ? forecast.values.map((value, index) => ({ x: left + step * (bars.length + index + 0.5), y: priceY(value), value })) : [];
+  const forecastGeometry = forecast ? { ...forecast, x0: boundary, points: [{ x: candles.at(-1).x, y: candles.at(-1).closeY }, ...forecastPoints] } : null;
   const markers = markerValues(options).filter((marker) => marker.price / priceUnit >= scaleMin && marker.price / priceUnit <= scaleMax)
     .map((marker) => ({ ...marker, y: priceY(marker.price) }));
   const dateLabel = (index) => {
@@ -232,11 +302,13 @@ export function buildKLineGeometry(data, options = {}) {
   const dateIndices = bars.length === 1 ? [0] : [0, bars.length - 1];
   // Keep dates aligned with the candle axis. Stagger endpoint labels when the
   // complete formatted widths cannot share a row; do not shrink the text.
-  const dates = dateIndices.map((index) => ({
+  let dates = dateIndices.map((index) => ({
     index, label: dateLabel(index), x: bars.length === 1 ? (left + right) / 2 : index === 0 ? left : right,
     anchor: bars.length === 1 ? 'middle' : index === 0 ? 'start' : 'end', y: volumeBottom + 30,
   }));
-  if (dates.length === 2 && textWidth(dates[0].label) + textWidth(dates[1].label) + 16 > right - left) {
+  if (forecast) {
+    dates = forecastDates(bars, dateLabel, left, right, boundary, volumeBottom + 30, forecast);
+  } else if (dates.length === 2 && textWidth(dates[0].label) + textWidth(dates[1].label) + 16 > right - left) {
     dates[1].y += wrapLabel(dates[0].label, right - left).length * 30;
   } else if (bars.length > 2) {
     const index = Math.floor((bars.length - 1) / 2);
@@ -253,7 +325,7 @@ export function buildKLineGeometry(data, options = {}) {
     height = Math.max(height, date.y + (date.rows.length - 1) * 30 + 24);
   }
   return { width, height, bars, candles, movingAverages, markers, plot, ticks, dateIndices,
-    dates, axis, header: header.labels, volumeLabels, high, low, maxVolume };
+    dates, axis, header: header.labels, volumeLabels, high, low, maxVolume, forecast: forecastGeometry };
 }
 
 /** Render offline, script-free OHLCV SVG. Up is always green and down red; only colors: 'cn' (explicit opt-in) makes up red. */
@@ -282,6 +354,9 @@ export function renderKLine(data, options = {}) {
     parts.push('</g></svg>');
     return parts.join('');
   }
+  if (chart.forecast) {
+    parts.push(`<rect class="forecast-band" data-label-role="forecast-band" x="${chart.forecast.x0}" y="${plot.top}" width="${plot.right - chart.forecast.x0}" height="${plot.volumeBottom - plot.top}" fill="${FORECAST_BAND}"/>`);
+  }
   for (const tick of chart.ticks) {
     parts.push(line(plot.left, tick.y, plot.right, tick.y, 'stroke="#e2e8f0"'));
     parts.push(text(chart.axis.right - 8, tick.y + 6, tick.label,
@@ -303,6 +378,9 @@ export function renderKLine(data, options = {}) {
       parts.push(`<circle cx="${point.x}" cy="${point.y}" r="2" fill="${stroke}"/>`);
     } else parts.push(`<polyline class="moving-average" fill="none" stroke="${stroke}" stroke-width="1.5" points="${average.points.map((point) => `${point.x},${point.y}`).join(' ')}"/>`);
   });
+  if (chart.forecast) {
+    parts.push(`<polyline class="forecast-line" data-label-role="forecast-line" fill="none" stroke="${FORECAST_LINE}" stroke-width="2" stroke-dasharray="8 6" points="${chart.forecast.points.map((point) => `${point.x},${point.y}`).join(' ')}"/>`);
+  }
   chart.markers.forEach((marker) => {
     const stroke = marker.type === 'support' ? '#2563eb' : '#9333ea';
     parts.push(line(plot.left, marker.y, plot.right, marker.y, `class="price-marker" stroke="${stroke}" stroke-dasharray="6 4"`),

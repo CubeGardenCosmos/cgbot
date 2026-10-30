@@ -19,6 +19,7 @@ from urllib.parse import urlsplit
 
 IMAGE_ROOT = Path("/opt/cgbot")
 BRIDGE_SCRIPT = IMAGE_ROOT / "bridge" / "cgbot_bridge_mcp.py"
+REPORT_SCRIPT = IMAGE_ROOT / "bridge" / "cgbot_report_mcp.py"
 SKILLS_SRC = IMAGE_ROOT / "skills"
 AGENTS_SRC = IMAGE_ROOT / "codex" / "AGENTS.md"
 LSP_CONFIG = IMAGE_ROOT / "lsp" / "cclsp.json"
@@ -145,6 +146,12 @@ def render_config(values: dict[str, str], home: Path, catalog_path: Path) -> str
         f"args = [{toml_str(str(BRIDGE_SCRIPT))}]",
         'env_vars = ["CGBOT_BRIDGE_URL", "CGBOT_BRIDGE_TOKEN", "CGBOT_USER_ID"]',
         "",
+        "[mcp_servers.report]",
+        'command = "python3"',
+        f"args = [{toml_str(str(REPORT_SCRIPT))}]",
+        'env_vars = ["HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "no_proxy"]',
+        "tool_timeout_sec = 240",
+        "",
         "[mcp_servers.playwright]",
         'command = "playwright-mcp"',
         "args = [" + ", ".join(toml_str(a) for a in playwright_args) + "]",
@@ -209,6 +216,7 @@ def main() -> None:
     check_effort(values["CGBOT_REASONING_EFFORT"])
     for required_path in (
         BRIDGE_SCRIPT,
+        REPORT_SCRIPT,
         AGENTS_SRC,
         LSP_CONFIG,
         SKILLS_SRC,

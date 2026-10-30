@@ -1,30 +1,31 @@
 ---
 name: rich-report
-description: Render Chinese-first Markdown reports with charts into offline PNG long images (PDF on request) using the richdoc CLI, then deliver them through the bridge MCP report_progress tool.
+description: Render Chinese-first Markdown reports with K-line and share charts into offline PNG long images (PDF on request) with the report tools (render_report, kline_chart; richdoc underneath), then deliver them through the bridge MCP report_progress tool.
 ---
 
 # rich-report
 
-Render a report offline with the `richdoc` CLI. The renderer is installed at `/opt/cgbot/tools/richdoc`, and `richdoc` is on PATH.
+Use the MCP tools first. They are in your tool list; this file explains the markup and the rules they enforce.
+
+- `kline_chart`: draws an OHLCV K-line PNG from `data` or `file_path`. Use it for every index and stock chart.
+- `render_report`: renders Markdown (`markdown` or `markdown_path`) to PNG (default) or PDF. Put `<KLine/>` and `<Chart/>` components in the Markdown.
+- The `richdoc` CLI sits underneath both tools. Call it directly only when the tools are unavailable: `richdoc input.md [output.png|output.pdf] [--format png|pdf|both] [--output-dir DIR]`.
 
 ## Workflow
 
-1. Write the report as UTF-8 Markdown (with optional components below) under `/workspace/artifacts/<name>.md`.
-2. Render:
-
-```sh
-richdoc /workspace/artifacts/<name>.md /workspace/artifacts/<name>.png
-richdoc input.md [output.png|output.pdf] [--format png|pdf|both] [--output-dir DIR]
-```
-
-3. Review the result (see checklist below). The model behind this sandbox is text-only: do NOT try to open or view PNGs (the `view_image` tool is unavailable and image input can hang the model). Review the Markdown source and richdoc's reported errors/warnings instead, fix and re-render until clean.
-4. Deliver through the bridge MCP tool `report_progress`, passing the PNG/PDF paths printed by richdoc in the `files` array as absolute paths, e.g. `/workspace/artifacts/<name>.png`. Delivered paths MUST be inside `/workspace` or `/home/agent`; the bridge rejects others.
+1. Get data with `market_data` (see the findata skill). Never fetch market data by hand.
+2. Draw each K-line with `kline_chart`, passing the bars file from `market_data` as `file_path`.
+3. Write the report as UTF-8 Markdown under `/workspace/artifacts/<name>.md`, or pass the text as `markdown`, and call `render_report`.
+4. Read the tool result. It lists the files, their pixel sizes and page counts, and any `richdoc errors`. Fix the Markdown or data and render again until there are no errors.
+5. Deliver the PNG/PDF paths the tool returned with the bridge `report_progress` tool, in `files`, as absolute paths. Paths must be inside `/workspace` or `/home/agent`; the bridge rejects others.
 
 Example delivery arguments:
 
 ```json
 {"message":"结论与依据已整理为长图，末尾注明来源和不确定性。","files":["/workspace/artifacts/brief.png"],"status":"completed"}
 ```
+
+The model behind this sandbox is text-only. Do NOT try to open or view PNGs. Review the Markdown source and the tool's reported errors instead.
 
 Renderer limits: each output PNG is exactly 1080px wide and is split into multiple images for long content. Files outside `/workspace` and `/home/agent` can be previewed locally but cannot be delivered.
 
@@ -39,7 +40,7 @@ Renderer limits: each output PNG is exactly 1080px wide and is split into multip
 
 Use ordinary Markdown for title, sections, lists, links, quotes and code. Use compact tables with explicit units.
 
-Color convention: 上涨一律绿色、下跌一律红色 for every company and market. Keep +/− signs on signed changes (color alone is insufficient). Do not use the red-up `cn` convention unless the user explicitly asks for it.
+Color convention: 上涨一律绿色、下跌一律红色 for every company and market. Keep +/− signs on signed changes (color alone is insufficient). Do not use the red-up `cn` convention unless the user explicitly asks for it. `kline_chart` defaults to this convention (`colors` intl).
 
 Component props must be quoted strings, booleans, or strict JSON in `{…}`: double-quoted keys, no trailing commas, no JavaScript expressions.
 
@@ -66,24 +67,36 @@ flowchart TD
 
 Math uses KaTeX: `$g=(R_t-R_0)/R_0$` inline or a `$$` display block.
 
-Charts: `Chart` takes `data={[{"name":"甲","value":2}]}` for simple charts, or an explicit data-only ECharts `option` for radar, scatter, heatmap and similar. Area uses `type="line"` with `areaStyle`. No formatter functions.
+## Share and bar charts
+
+Commerce and market charts use K-lines plus horizontal or stacked bar share charts. Never use pie, donut or radar charts for them. The `Chart` component takes `data={[{"name":"甲","value":2}]}` for simple charts, or a data-only ECharts `option`. Area uses `type="line"` with `areaStyle`. No formatter functions.
+
+Horizontal bars put the category on `yAxis`. Stacked shares use one `stack` name:
 
 ```jsx
-<Chart type="bar" title="行业" option={{"xAxis":{"type":"category","data":["科技","消费"]},"yAxis":{},"series":[{"type":"bar","data":[8,-2]}]}} />
-<Chart type="heatmap" title="热力" option={{"xAxis":{"type":"category","data":["东","西"]},"yAxis":{"type":"category","data":["甲","乙"]},"visualMap":{"min":0,"max":10},"series":[{"type":"heatmap","data":[[0,0,8],[1,0,3],[0,1,5],[1,1,9]]}]}} />
+<Chart type="bar" title="成交占比" option={{"xAxis":{"type":"value","max":100},"yAxis":{"type":"category","data":["甲","乙"]},"series":[{"name":"占比","type":"bar","stack":"share","data":[60,40]}]}} />
 ```
 
 ## Stock charts (mandatory for market reports)
 
-Any report about stocks or market conditions MUST include a K-line chart for every index and every individual stock discussed, built from real daily OHLCV data (about 60+ bars, never fabricated). Tables or line charts do not replace it. If data is unobtainable for an item, state that explicitly.
+Any report about stocks or market conditions MUST include a K-line chart for every index and every individual stock discussed, built from real daily OHLCV data (at least 60 daily bars, never fabricated). Tables or line charts do not replace it. If data is unobtainable for an item, state that explicitly.
+
+Use `kline_chart` for each one. Pass `file_path` from `market_data kline`, plus `title`, `symbol`, optional `ma` (default 5, 10, 20, 60), and optional `markers` (support and resistance levels). The same K-line is available as a `<KLine/>` tag inside `render_report` Markdown:
 
 ```jsx
 <KLine title="示例" symbol="DEMO" ma={[5,10,20,60]} data={[{"date":"2026-01-01","open":100,"high":104,"low":98,"close":102,"volume":12000}]} markers={[{"price":98,"type":"support","label":"支撑"},{"price":104,"type":"resistance","label":"阻力"}]} />
 ```
 
-`data` rows need ordered dates; OHLCV must be finite and consistent. Default moving averages `[5,10,20,60]`.
+`data` rows need ordered dates; OHLCV must be finite and consistent. The renderer draws the latest 500 bars of longer input. Cite the printed source, last trading date, data timestamp and adjustment basis; never relabel a prior session as today's data. Keep one market per report task.
 
-Get OHLCV with the preinstalled **findata** skill, not ad-hoc HTTP probes. Read `/opt/cgbot/skills/findata/SKILL.md` first, then for example `findata kline 600519 --market CN --limit 120 --out /workspace/artifacts/600519.json`. Pass the array to the `KLine` `data` prop. Cite the printed source, last trading date, data timestamp and adjustment basis; never relabel a prior session as today's data. Keep one market per report task.
+## Forecasts
+
+Forecasts are allowed only when they are visibly separated from measured data:
+
+- Pass them through `kline_chart forecast`, or as a `forecast` prop on `<KLine/>`: `{label, start, end, series}`. `start` must be after the last bar date, `series` holds 1–250 values (numbers or `{date, close}`), and `label` must contain `非实测` (the default is `预测(非实测)`).
+- The forecast is drawn as a dashed indigo line over a shaded band and labelled `预测至 <end>`. Its legend reads `预测(非实测)`. Do not restyle it.
+- State the forecast basis (method, inputs, horizon) and its uncertainty in the body text, next to the chart.
+- Never draw a forecast as a solid line, never give it red or green, and never mix forecast colours with measured data.
 
 ## Example inputs
 
@@ -97,13 +110,14 @@ Render an example to check the toolchain: `richdoc /opt/cgbot/tools/richdoc/exam
 
 ## Manual review before delivery
 
-Without image input, check the source and richdoc's output for every split image. Check:
+Without image input, check the source and the tool output for every split image. Check:
 
 - text and labels do not overflow; cards and sections are not cut off;
 - Chinese and other glyphs are readable, with no replacement characters or tofu;
 - no empty or uninitialized charts;
 - increases are green and decreases red, with signs and labels;
 - every user-requested data item is present with real observation or trading dates, units and sources, or is explicitly marked unavailable;
+- forecasts are labelled `预测(非实测)` with basis and uncertainty stated;
 - split boundaries and uncertainty wording are correct.
 
 If anything fails, fix the content or layout and re-render. Never claim a visual check you did not perform; state that the layout was verified structurally, not by eye.

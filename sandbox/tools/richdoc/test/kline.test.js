@@ -284,3 +284,59 @@ test('deterministic stock and index fixtures retain finite geometry across all M
     }
   }
 });
+
+test('forecast extends the x-axis, shades a band, and draws a dashed legend-labelled line', () => {
+  const bars = series(10);
+  const forecast = { start: '2026-01-11', end: '2026-01-20', series: [14, 15, 16, 17, 18] };
+  const chart = buildKLineGeometry(bars, { forecast });
+  const step = (chart.plot.right - chart.plot.left) / 15;
+  assert.equal(chart.candles.length, 10);
+  assert.ok(Math.abs(chart.candles[9].x - (chart.plot.left + step * 9.5)) < 1e-9);
+  assert.ok(Math.abs(chart.forecast.x0 - (chart.plot.left + step * 10)) < 1e-9);
+  assert.equal(chart.forecast.points.length, 6);
+  assert.ok(Math.abs(chart.forecast.points[1].x - (chart.plot.left + step * 10.5)) < 1e-9);
+  assertFiniteGeometry(chart);
+
+  const svg = renderKLine(bars, { forecast });
+  assert.match(svg, /class="forecast-band"/);
+  assert.match(svg, /class="forecast-line"[^>]*stroke-dasharray="8 6"/);
+  assert.match(svg, /class="forecast-line"[^>]*stroke="#4338ca"/);
+  assert.match(svg, /data-label-role="forecast-legend"[^>]*>预测\(非实测\)：2026-01-11 至 2026-01/);
+  assert.match(svg, /-20，虚线与蓝紫底色标注预测区间/);
+  assert.match(svg, /预测至 2026-01-20/);
+  assert.doesNotMatch(svg, /NaN|Infinity/);
+});
+
+test('forecast closes widen the price scale without changing measured high and low', () => {
+  const bars = series(5);
+  const chart = buildKLineGeometry(bars, {
+    forecast: { label: '预测(非实测)', start: '2026-01-10', end: '2026-01-12', series: [40, { date: '2026-01-11', close: 2 }] },
+  });
+  assert.ok(chart.ticks[0].value >= 40);
+  assert.equal(chart.high, 17);
+  assert.equal(chart.low, 8);
+});
+
+test('invalid forecasts are rejected before a chart is drawn', () => {
+  const bars = series(5);
+  const base = { start: '2026-01-10', end: '2026-01-12', series: [10, 11, 12] };
+  const cases = [
+    [{ ...base, start: '2026-01-05', end: '2026-01-07' }, /after the last bar/],
+    [{ ...base, end: '2026-01-09' }, /must not precede/],
+    [{ ...base, start: '2026-02-30', end: '2026-03-01' }, /valid YYYY-MM-DD/],
+    [{ ...base, series: [] }, /1-250 values/],
+    [{ ...base, series: [10, -1] }, /finite non-negative/],
+    [{ ...base, series: [10, 'x'] }, /finite non-negative/],
+    [{ ...base, label: '预测' }, /非实测/],
+  ];
+  for (const [forecast, pattern] of cases) {
+    assert.throws(() => buildKLineGeometry(bars, { forecast }), pattern);
+  }
+  assert.throws(() => buildKLineGeometry(bars, { forecast: 'x' }), /must be an object/);
+  assert.throws(() => buildKLineGeometry([], { forecast: base }), /at least one valid bar/);
+});
+
+test('charts without a forecast carry no forecast markup', () => {
+  const svg = renderKLine(series(10));
+  assert.doesNotMatch(svg, /forecast/);
+});
