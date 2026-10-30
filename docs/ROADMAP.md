@@ -6,7 +6,7 @@
 | Milestone | Roadmap | 状态 |
 | --- | --- | --- |
 | M0 | [基线与决策收束](roadmaps/M0-baseline.md) | R0.1、R0.2 待验收 |
-| M1 | [核心骨架](roadmaps/M1-core.md) | 规划中 |
+| M1 | [核心骨架](roadmaps/M1-core.md) | 进行中 |
 | M2 | [私聊体验](roadmaps/M2-private-chat.md) | 规划中 |
 | M3 | [群聊子系统](roadmaps/M3-group-chat.md) | 规划中 |
 | M4 | [语音](roadmaps/M4-voice.md) | 规划中 |

@@ -1,6 +1,6 @@
 # cgbot TODO 索引
 
-上层:[Milestone](../MILESTONE.md)、[Roadmap 索引](../ROADMAP.md)。每个准备执行的 Roadmap 条目一份 TODO。文档建立不表示业务已开工;**当前全部未开工**,从 M0 开始。
+上层:[Milestone](../MILESTONE.md)、[Roadmap 索引](../ROADMAP.md)。每个准备执行的 Roadmap 条目一份 TODO。文档建立不表示业务已开工;**M0 待验收,M1 进行中**,其余里程碑未开工。
 状态词:规划中、待决策、可执行、进行中、待验收、已完成。
 
 ## M0 基线与决策收束
@@ -14,13 +14,13 @@
 
 | 条目 | TODO | 状态 |
 | --- | --- | --- |
-| R1.1 | [配置系统与服务范围白名单](R1.1-config-allowlist.md) | 规划中 |
-| R1.2 | [统一消息模型与 NapCat 反向 WS 适配器](R1.2-message-model-napcat.md) | 规划中 |
-| R1.3 | [身份与入口](R1.3-identity-channels.md) | 规划中 |
-| R1.4 | [会话存储](R1.4-session-store.md) | 规划中 |
-| R1.5 | [供应商抽象层](R1.5-provider-responses.md) | 规划中 |
-| R1.6 | [Agent 循环与 reply 工具](R1.6-agent-loop-reply-tool.md) | 规划中 |
-| R1.7 | [调度器与系统事件队列](R1.7-scheduler-system-events.md) | 规划中 |
+| R1.1 | [配置系统与服务范围白名单](R1.1-config-allowlist.md) | 待验收 |
+| R1.2 | [统一消息模型与 NapCat 反向 WS 适配器](R1.2-message-model-napcat.md) | 进行中 |
+| R1.3 | [身份与入口](R1.3-identity-channels.md) | 待验收 |
+| R1.4 | [会话存储](R1.4-session-store.md) | 待验收 |
+| R1.5 | [供应商抽象层](R1.5-provider-responses.md) | 待验收 |
+| R1.6 | [Agent 循环与 reply 工具](R1.6-agent-loop-reply-tool.md) | 待验收 |
+| R1.7 | [调度器与系统事件队列](R1.7-scheduler-system-events.md) | 待验收 |
 
 ## M2 私聊体验
 

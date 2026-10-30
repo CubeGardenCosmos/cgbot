@@ -2,19 +2,19 @@
 
 建立首期 QQ 私聊的配置、入口、身份、可恢复会话、供应商、Agent 工具循环和系统事件接口，供后续私聊体验、群聊、语音及 Coding Agent 复用。不实现微信，不沿用 AstraBot 运行时或 DSH 兼容层。所属：[M1](../MILESTONE.md)。
 
-状态：规划中
+状态：进行中
 
 各条目归属为能力负责人，具体人员待定；依赖表示实施前置，不表示已实现。
 
 | 编号 | 能力 | 依赖 | 验收条件 | 状态 | TODO 链接 |
 | --- | --- | --- | --- | --- | --- |
-| R1.1 | 配置系统与服务范围白名单；归属：配置负责人 | R0.1 范围边界、R0.2 | 配置文件驱动且无 WebUI；仅好友与固定配置群进入服务；范围外不进入业务与 LLM | 待决策 | [TODO](../todos/R1.1-config-allowlist.md) |
-| R1.2 | 统一消息模型与 NapCat 反向 WS；归属：适配器负责人 | R0.1 WS 验证、R0.2、R1.1 | NapCat 作客户端、框架作服务端；消息、引用、入口及输入状态可无损交接，平台调用可回到来源 | 待决策 | [TODO](../todos/R1.2-message-model-napcat.md) |
-| R1.3 | 身份与入口；归属：身份负责人 | R1.1、R1.2 的消息契约 | QQ 创建身份；同一用户一个私聊总会话；入口抽象预留多入口但不实现微信关联 | 待决策 | [TODO](../todos/R1.3-identity-channels.md) |
-| R1.4 | 会话存储；归属：存储负责人 | R0.2、R1.3 的归属契约 | 追加式日志、SQLite 与恢复方案经确认后实现；消息、工具与压缩事件重启可恢复，不把群会话混作私聊总会话 | 待决策 | [TODO](../todos/R1.4-session-store.md) |
-| R1.5 | 供应商抽象层；归属：模型接入负责人 | R0.1 上游验证、R0.2、R1.1 | 单供应商独立封装窗口、档位、请求、计费/限流；主 Agent Responses 选择确认，原生接口真实跑通 | 待决策 | [TODO](../todos/R1.5-provider-responses.md) |
-| R1.6 | Agent 循环与 reply 工具；归属：Agent 负责人 | R1.2—R1.5 | 只有 reply 工具外发；可选入口/引用，默认来源；工具调用与结果可继续模型轮次 | 待决策 | [TODO](../todos/R1.6-agent-loop-reply-tool.md) |
-| R1.7 | 调度器与系统事件队列；归属：调度负责人 | R1.3、R1.4、R1.6 的事件接口 | 到点主动触发的基础能力与系统事件唤醒可用；不依赖下一条用户消息，不复用 CronMessageEvent | 待决策 | [TODO](../todos/R1.7-scheduler-system-events.md) |
+| R1.1 | 配置系统与服务范围白名单；归属：配置负责人 | R0.1 范围边界、R0.2 | 配置文件驱动且无 WebUI；仅好友与固定配置群进入服务；范围外不进入业务与 LLM | 待验收 | [TODO](../todos/R1.1-config-allowlist.md) |
+| R1.2 | 统一消息模型与 NapCat 反向 WS；归属：适配器负责人 | R0.1 WS 验证、R0.2、R1.1 | NapCat 作客户端、框架作服务端；消息、引用、入口及输入状态可无损交接，平台调用可回到来源 | 进行中 | [TODO](../todos/R1.2-message-model-napcat.md) |
+| R1.3 | 身份与入口；归属：身份负责人 | R1.1、R1.2 的消息契约 | QQ 创建身份；同一用户一个私聊总会话；入口抽象预留多入口但不实现微信关联 | 待验收 | [TODO](../todos/R1.3-identity-channels.md) |
+| R1.4 | 会话存储；归属：存储负责人 | R0.2、R1.3 的归属契约 | 追加式日志、SQLite 与恢复方案经确认后实现；消息、工具与压缩事件重启可恢复，不把群会话混作私聊总会话 | 待验收 | [TODO](../todos/R1.4-session-store.md) |
+| R1.5 | 供应商抽象层；归属：模型接入负责人 | R0.1 上游验证、R0.2、R1.1 | 单供应商独立封装窗口、档位、请求、计费/限流；主 Agent Responses 选择确认，原生接口真实跑通 | 待验收 | [TODO](../todos/R1.5-provider-responses.md) |
+| R1.6 | Agent 循环与 reply 工具；归属：Agent 负责人 | R1.2—R1.5 | 只有 reply 工具外发；可选入口/引用，默认来源；工具调用与结果可继续模型轮次 | 待验收 | [TODO](../todos/R1.6-agent-loop-reply-tool.md) |
+| R1.7 | 调度器与系统事件队列；归属：调度负责人 | R1.3、R1.4、R1.6 的事件接口 | 到点主动触发的基础能力与系统事件唤醒可用；不依赖下一条用户消息，不复用 CronMessageEvent | 待验收 | [TODO](../todos/R1.7-scheduler-system-events.md) |
 
 ## 待决策
 
