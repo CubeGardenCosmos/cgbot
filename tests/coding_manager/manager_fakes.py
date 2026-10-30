@@ -79,6 +79,8 @@ class UserSandbox:
     resume_status: str | None = None  # emit thread_status on resume when set
     resume_fails: bool = False
     turn_start_failures: int = 0
+    ephemeral: set[str] = field(default_factory=set)  # side forks: never listed
+    unsubscribed: list[str] = field(default_factory=list)
 
 
 class FakeCodexServer:
@@ -198,7 +200,12 @@ class FakeCodexClient:
         return info
 
     async def thread_list(self, *, include_archived: bool = False) -> list[ThreadInfo]:
-        return [t for t in self._sb.threads.values() if include_archived or not t.archived]
+        hidden = self._sb.ephemeral
+        return [
+            t
+            for t in self._sb.threads.values()
+            if (include_archived or not t.archived) and t.thread_id not in hidden
+        ]
 
     async def thread_read(
         self,
@@ -221,13 +228,20 @@ class FakeCodexClient:
         self._info(thread_id)
         del self._sb.threads[thread_id]
 
-    async def thread_fork(self, thread_id: str) -> ThreadInfo:
+    async def thread_fork(self, thread_id: str, *, ephemeral: bool = False) -> ThreadInfo:
         parent = self._info(thread_id)
         forked = ThreadInfo(
             thread_id=self._server.new_thread_id(), title=parent.title, updated_at=0.0
         )
         self._sb.threads[forked.thread_id] = forked
+        if ephemeral:
+            self._sb.ephemeral.add(forked.thread_id)
         return forked
+
+    async def thread_unsubscribe(self, thread_id: str) -> str:
+        self._info(thread_id)
+        self._sb.unsubscribed.append(thread_id)
+        return "unsubscribed"
 
     async def thread_compact(self, thread_id: str) -> None:
         self._info(thread_id)

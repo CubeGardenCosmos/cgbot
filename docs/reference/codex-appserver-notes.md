@@ -59,6 +59,8 @@ command = "/abs/path/mcp_probe.sh"
   - 收到 `deprecationNotice`：完整历史水合已弃用，建议 `excludeTurns:true`，再用 `thread/turns/list` / `thread/items/list` 分页。**[观测]**
   - 未测试 `excludeTurns` 参数本身。**[未验证]**
 - **`thread/fork`** 参数 `{threadId}`。结果 `thread` 的 `id` 为新 id，`forkedFromId` 为源 id；顶层形状同 `thread/start`。伴随 `thread/started`、`thread/goal/cleared`、`mcpServer/startupStatus/updated`。**[观测]**
+- **`thread/fork` 带 `{threadId, ephemeral:true, excludeTurns:true}`**（`codex_btw` 旁路进度询问）。ephemeral 不落盘、不进入 `thread/list`（**[未验证]**，以真实 codex 为准）。
+- **`thread/unsubscribe`** 参数 `{threadId}`，结果读取 `status` 字段。**[未验证]**
 - **`thread/turns/list`** 参数 `{threadId, limit}`。结果 `{data:[turn,…]}`；turn 含 `id`、`rootTurnId`、`items`、`status`、`startedAt`、`completedAt`、`durationMs`、`error`；item 类型如 `userMessage`（`content:[{type:"text",text}]`）、`agentMessage`（`text`）。**[观测]**
 - **`thread/list`** 结果 `{data:[thread,…]}`。**[观测]**
 - **`thread/status/changed`**（通知，不是请求）：

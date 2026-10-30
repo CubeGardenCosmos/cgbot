@@ -26,6 +26,7 @@ MAX_READ_LIMIT = 50
 DEFAULT_READ_LIMIT = 10
 ITEM_CHARS = 500
 PREVIEW_CHARS = 200
+BTW_CLIP_CHARS = 1500
 
 SCOPE_MESSAGE = "Coding Agent tools are only available in the private chat"
 _NOTE = (
@@ -194,6 +195,29 @@ def _make_peek(service: CodingService) -> ToolHandler:
     return _guarded(frozenset({"thread_id"}), run)
 
 
+def _sole_running_thread_id(statuses: list[ThreadStatus]) -> str:
+    running = [status for status in statuses if status.running]
+    if not running:
+        raise _Refused("没有运行中的线程可以询问进展")
+    if len(running) > 1:
+        raise _Refused("有多个运行中的线程，请先用 codex_list 查看后用 thread_id 指定")
+    return running[0].thread_id
+
+
+def _make_btw(service: CodingService) -> ToolHandler:
+    async def run(user_id: str, args: dict[str, Any]) -> ToolResult:
+        question = _required_text(args, "question", max_chars=MAX_PROMPT_CHARS)
+        thread_id = _optional_text(args, "thread_id", max_chars=MAX_THREAD_ID_CHARS)
+        if thread_id is None:
+            thread_id = _sole_running_thread_id(await service.list_threads(user_id))
+        answer = await service.ask_progress(user_id, thread_id, question)
+        return ToolResult(
+            "Codex 的进展回答（请口语化概括给用户，勿原样粘贴）：\n" + _clip(answer, BTW_CLIP_CHARS)
+        )
+
+    return _guarded(frozenset({"question", "thread_id"}), run)
+
+
 def _make_read(service: CodingService) -> ToolHandler:
     async def run(user_id: str, args: dict[str, Any]) -> ToolResult:
         thread_id = _required_text(args, "thread_id", max_chars=MAX_THREAD_ID_CHARS)
@@ -276,7 +300,7 @@ def _make_fork(service: CodingService) -> ToolHandler:
 
 
 def codex_tools(service: CodingService) -> tuple[ToolSpec, ...]:
-    """The eleven private-chat ``codex_*`` tools bound to ``service``."""
+    """The twelve private-chat ``codex_*`` tools bound to ``service``."""
     return (
         ToolSpec(
             name="codex_submit",
@@ -306,6 +330,22 @@ def codex_tools(service: CodingService) -> tuple[ToolSpec, ...]:
             description="查看一个线程的当前状态。" + _NOTE,
             parameters_schema=_schema({"thread_id": _THREAD}, required=("thread_id",)),
             handler=_make_peek(service),
+        ),
+        ToolSpec(
+            name="codex_btw",
+            description=(
+                "旁路询问正在运行的 Coding Agent 进展：不打断它、不排队，由 Codex 自己回答。"
+                "返回的是 Codex 原话，请口语化概括给用户，不要原样粘贴，也不要提及 thread_id。"
+                "不传 thread_id 时要求恰好只有一个运行中的线程。请勿循环轮询。"
+            ),
+            parameters_schema=_schema(
+                {
+                    "question": {"type": "string", "description": "想问的进展问题"},
+                    "thread_id": _THREAD,
+                },
+                required=("question",),
+            ),
+            handler=_make_btw(service),
         ),
         ToolSpec(
             name="codex_read",

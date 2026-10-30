@@ -48,6 +48,14 @@ VANISHED_TEXT = "沙盒连接中断，运行中的任务状态丢失，已记为
 START_FAILED_TEXT = "排队指令启动失败，已丢弃"
 QUEUE_STARTED_TEXT = "排队指令开始执行"
 
+PROGRESS_TIMEOUT = 90.0
+PROGRESS_EMPTY_TEXT = "（没有拿到进展文本）"
+PROGRESS_PREFIX = (
+    "这是一次旁路进度询问，不是新任务。请用简短的纯文本回答："
+    "已完成什么、正在做什么、还剩什么、有无阻塞、大致还需多久。"
+    "不要调用任何工具，不要修改任何文件。\n\n问题："
+)
+
 _TURN_END: dict[str, tuple[NoticeKind, str]] = {
     "completed": ("turn_completed", DEFAULT_DONE_TEXT),
     "interrupted": ("turn_interrupted", DEFAULT_STOPPED_TEXT),
@@ -101,6 +109,8 @@ class _UserState:
         self.session: _Session | None = None
         self.refs = 0  # read operations currently holding the session
         self.reconnect: asyncio.Task[None] | None = None
+        self.side: dict[str, asyncio.Future[CodexEvent]] = {}  # ephemeral fork id -> waiter
+        self.side_lock = asyncio.Lock()  # one progress check per user at a time
 
 
 def _is_busy(user: _UserState) -> bool:
@@ -359,6 +369,45 @@ class CodingManager:
         self._memo(user, info.thread_id).title = info.title
         return SubmitResult(thread_id=info.thread_id, state="started", queue_position=0)
 
+    async def ask_progress(
+        self, user_id: str, thread_id: str, question: str, *, wait_seconds: float = PROGRESS_TIMEOUT
+    ) -> str:
+        """Ask Codex how a thread is going via an ephemeral fork; the running turn is untouched.
+
+        Returns Codex's own answer text. The fork is never persisted or listed; before this
+        returns it is unsubscribed (and its side turn interrupted if still running).
+        """
+        self._check_ready()
+        user = self._user(user_id)
+        if self._governor.degraded:
+            raise CodingError("Codex is rate-limited right now; try again shortly")
+        if user.side_lock.locked():
+            raise CodingError("another progress check is already running")
+        async with user.side_lock:
+            async with self._client_for(user) as client:
+                await self._verify(client, thread_id)
+                fork = await self._guard(
+                    "progress fork", client.thread_fork(thread_id, ephemeral=True)
+                )
+                fork_id = fork.thread_id
+                waiter: asyncio.Future[CodexEvent] = asyncio.get_running_loop().create_future()
+                user.side[fork_id] = waiter
+                turn_id: str | None = None
+                try:
+                    turn_id = await self._guard(
+                        "progress turn", client.turn_start(fork_id, PROGRESS_PREFIX + question)
+                    )
+                    await asyncio.wait({waiter}, timeout=wait_seconds)
+                    if not waiter.done():
+                        raise CodingError("progress check timed out")
+                    event = waiter.result()
+                finally:
+                    user.side.pop(fork_id, None)
+                    await self._discard_side(client, fork_id, None if waiter.done() else turn_id)
+        if event.status != "completed":
+            raise CodingError("progress check did not complete")
+        return (event.text or "").strip()[:TEXT_LIMIT] or PROGRESS_EMPTY_TEXT
+
     # ------------------------------------------------------------------ helpers: state
 
     def _check_ready(self) -> None:
@@ -471,6 +520,18 @@ class CodingManager:
         except Exception as exc:
             logger.info("thread verify failed (%s)", type(exc).__name__)
             raise CodingError("thread not found") from exc
+
+    async def _discard_side(self, client: CodexClient, fork_id: str, turn_id: str | None) -> None:
+        """Best-effort cleanup of an ephemeral side fork (codex refuses archive/delete for it)."""
+        if turn_id is not None:
+            try:
+                await client.turn_interrupt(fork_id, turn_id)
+            except Exception as exc:
+                logger.info("progress turn interrupt failed (%s)", type(exc).__name__)
+        try:
+            await client.thread_unsubscribe(fork_id)
+        except Exception as exc:
+            logger.info("progress fork unsubscribe failed (%s)", type(exc).__name__)
 
     # ------------------------------------------------------------------ helpers: sessions
 
@@ -620,12 +681,18 @@ class CodingManager:
 
     async def _handle_event_locked(self, user: _UserState, event: CodexEvent) -> None:
         if event.kind == "turn_completed":
+            self._settle_side_locked(user, event)
             self._on_turn_completed_locked(user, event)
         elif event.kind == "thread_status":
             self._on_thread_status_locked(user, event)
         elif event.kind == "error":
             logger.warning("codex reported an error event")
         await self._dispatch_locked(user)
+
+    def _settle_side_locked(self, user: _UserState, event: CodexEvent) -> None:
+        waiter = user.side.get(event.thread_id) if event.thread_id is not None else None
+        if waiter is not None and not waiter.done():
+            waiter.set_result(event)
 
     def _on_turn_completed_locked(self, user: _UserState, event: CodexEvent) -> None:
         thread = event.thread_id

@@ -30,6 +30,7 @@ EXPECTED_NAMES = {
     "codex_archive",
     "codex_delete",
     "codex_fork",
+    "codex_btw",
 }
 
 
@@ -44,7 +45,7 @@ async def _call(
     return await spec.handler(tool_ctx(group=group), args)
 
 
-def test_exposes_eleven_tools_with_closed_schemas_and_no_polling_note() -> None:
+def test_exposes_twelve_tools_with_closed_schemas_and_no_polling_note() -> None:
     specs = codex_tools(FakeService())
     assert {spec.name for spec in specs} == EXPECTED_NAMES
     for spec in specs:

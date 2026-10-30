@@ -22,6 +22,7 @@ CODEX_TOOLS = {
     "codex_archive",
     "codex_delete",
     "codex_fork",
+    "codex_btw",
 }
 
 

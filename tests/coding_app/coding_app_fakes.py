@@ -47,6 +47,7 @@ class FakeService:
         self.items: list[dict[str, object]] = [{"type": "agentMessage", "text": "结果"}]
         self.read_cursor: str | None = "c2"
         self.dropped = 2
+        self.progress_text = "一切顺利"
 
     def _record(self, name: str, user_id: str, **kwargs: Any) -> None:
         self.calls.append((name, user_id, kwargs))
@@ -95,6 +96,10 @@ class FakeService:
     async def fork(self, user_id: str, thread_id: str) -> SubmitResult:
         self._record("fork", user_id, thread_id=thread_id)
         return self.submit_result
+
+    async def ask_progress(self, user_id: str, thread_id: str, question: str) -> str:
+        self._record("ask_progress", user_id, thread_id=thread_id, question=question)
+        return self.progress_text
 
     async def start(self) -> None:
         return None

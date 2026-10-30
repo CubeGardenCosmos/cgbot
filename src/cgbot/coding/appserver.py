@@ -371,8 +371,17 @@ class CodexAppServerClient:
     async def thread_delete(self, thread_id: str) -> None:
         await self._request("thread/delete", {"threadId": thread_id})
 
-    async def thread_fork(self, thread_id: str) -> ThreadInfo:
-        result = await self._request("thread/fork", {"threadId": thread_id})
+    async def thread_unsubscribe(self, thread_id: str) -> str:
+        result = await self._request("thread/unsubscribe", {"threadId": thread_id})
+        return str(result["status"])
+
+    async def thread_fork(self, thread_id: str, *, ephemeral: bool = False) -> ThreadInfo:
+        """Fork a thread; an ephemeral fork is sent with excludeTurns and is never listed."""
+        params: dict[str, Any] = {"threadId": thread_id}
+        if ephemeral:
+            params["ephemeral"] = True
+            params["excludeTurns"] = True
+        result = await self._request("thread/fork", params)
         return _thread_info(result["thread"], archived=False)
 
     async def thread_compact(self, thread_id: str) -> None:

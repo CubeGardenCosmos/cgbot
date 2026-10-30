@@ -28,6 +28,7 @@ TOOL_NAMES = {
     "codex_archive",
     "codex_delete",
     "codex_fork",
+    "codex_btw",
 }
 STOP_ORDER = ["web.stop", "bridge.close", "manager.close", "sandbox.close", "imagegen.close"]
 
