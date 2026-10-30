@@ -8,7 +8,7 @@ import stat
 import tomllib
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Final
+from typing import TYPE_CHECKING, Final
 
 from cgbot.config.settings import (
     WIRE_APIS,
@@ -26,6 +26,10 @@ from cgbot.config.settings import (
 )
 from cgbot.voice.config import load_voice_config
 
+if TYPE_CHECKING:
+    # Type-only: coding/config.py imports cgbot.config.settings (see _coding for the lazy import).
+    from cgbot.coding.config import CodingConfig, ImageGenConfig
+
 SECRETS_FILE_ENV: Final = "CGBOT_SECRETS_FILE"
 SECRET_ENV_PREFIX: Final = "CGBOT_SECRET_"
 
@@ -33,6 +37,8 @@ _MISSING: Final = object()
 _SECRET_NAME: Final = re.compile(r"[a-z][a-z0-9_]*")
 _QQ_ID: Final = re.compile(r"[1-9][0-9]*")
 _LOG_LEVELS: Final = frozenset({"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"})
+_SECRET_REF_PREFIX: Final = "secret:"
+_CONTAINER_PREFIX: Final = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*")
 
 
 def load_config(
@@ -69,6 +75,7 @@ def load_config(
     storage = _storage(root.sub("storage"), config_path.parent)
     logging_cfg = _logging(root.sub("logging"))
     voice_raw = root.raw_table("voice")
+    coding_raw = root.raw_table("coding")
     root.close()
 
     return Config(
@@ -79,6 +86,7 @@ def load_config(
         storage=storage,
         logging=logging_cfg,
         voice=load_voice_config(voice_raw) if voice_raw is not None else None,
+        coding=_coding(coding_raw, source, config_path.parent) if coding_raw is not None else None,
     )
 
 
@@ -169,6 +177,102 @@ def _logging(t: _Table) -> LoggingConfig:
         raise t.error("level", "须为 DEBUG/INFO/WARNING/ERROR/CRITICAL 之一")
     t.close()
     return LoggingConfig(level=level)
+
+
+def _coding(
+    raw: Mapping[str, object], source: _SecretSource, base_dir: Path
+) -> CodingConfig | None:
+    """``[coding]``: fully validated even when ``enabled = false``; disabled returns None."""
+    # Lazy import: coding/config.py imports cgbot.config.settings, and importing cgbot.config runs
+    # this module, so a module-level import would be cyclic when cgbot.coding is imported first.
+    from cgbot.coding import config as coding_cfg
+
+    t = _Table(raw, "coding")
+    enabled = t.bool_or("enabled", True)
+    token_secret = t.secret_ref("token_secret", source)
+
+    http_t = t.sub("http", required=True)
+    http = coding_cfg.HttpConfig(
+        host=http_t.text("host"),
+        port=http_t.port("port"),
+        public_base_url=http_t.http_url("public_base_url"),
+    )
+    http_t.close()
+
+    docker_t = t.sub("docker", required=True)
+    prefix = docker_t.text_or("container_prefix", "cgbot-sbx-")
+    if _CONTAINER_PREFIX.fullmatch(prefix) is None:
+        raise docker_t.error("container_prefix", "须以字母或数字开头,仅含字母、数字、_ . -")
+    docker = coding_cfg.DockerConfig(
+        host=docker_t.http_url("host"),
+        sandbox_image=docker_t.text("sandbox_image"),
+        network=docker_t.text("network"),
+        host_data_dir=docker_t.absolute_path("host_data_dir"),
+        egress_proxy=docker_t.proxy_url_or("egress_proxy", ""),
+        idle_seconds=docker_t.positive_number("idle_seconds"),
+        container_prefix=prefix,
+    )
+    docker_t.close()
+
+    codex_t = t.sub("codex", required=True)
+    codex = coding_cfg.CodexConfig(
+        model=codex_t.text("model"),
+        reasoning_effort=codex_t.text("reasoning_effort"),
+        appserver_port=codex_t.port("appserver_port"),
+    )
+    codex_t.close()
+
+    conc_t = t.sub("concurrency", required=True)
+    concurrency = coding_cfg.ConcurrencyConfig(
+        per_user=conc_t.positive_int("per_user"),
+        degraded=conc_t.positive_int("degraded"),
+        degrade_failures=conc_t.positive_int("degrade_failures"),
+        degrade_window_seconds=conc_t.positive_number("degrade_window_seconds"),
+        recover_after_seconds=conc_t.positive_number("recover_after_seconds"),
+    )
+    conc_t.close()
+
+    bridge_t = t.sub("bridge", required=True)
+    bridge = coding_cfg.BridgeConfig(
+        max_file_bytes=bridge_t.positive_int("max_file_bytes"),
+        chunk_bytes=bridge_t.positive_int("chunk_bytes"),
+        temp_dir=bridge_t.path_under("temp_dir", base_dir),
+        file_ttl_seconds=bridge_t.positive_number("file_ttl_seconds"),
+    )
+    bridge_t.close()
+
+    imagegen = _imagegen(t, source)
+    t.close()
+    if not enabled:
+        return None
+    return coding_cfg.CodingConfig(
+        token_secret=token_secret,
+        http=http,
+        docker=docker,
+        codex=codex,
+        concurrency=concurrency,
+        bridge=bridge,
+        imagegen=imagegen,
+    )
+
+
+def _imagegen(t: _Table, source: _SecretSource) -> ImageGenConfig | None:
+    from cgbot.coding import config as coding_cfg  # lazy: same cycle as in _coding
+
+    ig = t.optional_sub("imagegen")
+    if ig is None:
+        return None
+    cfg = coding_cfg.ImageGenConfig(
+        base_url=ig.http_url("base_url"),
+        api_key=ig.secret_ref("api_key", source),
+        model=ig.text("model"),
+        mode=ig.text("mode"),
+        timeout_seconds=ig.positive_number("timeout_seconds"),
+        proxy=ig.proxy_url_or("proxy", ""),
+        max_concurrency=ig.positive_int("max_concurrency"),
+    )
+    ig.close()
+    return cfg
 
 
 class _SecretSource:
@@ -314,6 +418,63 @@ class _Table:
             raise self.error(name, "须为字符串数组")
         items = (self._text(f"{name}[{i}]", item) for i, item in enumerate(value))
         return tuple(dict.fromkeys(items))
+
+    def bool_or(self, name: str, default: bool) -> bool:
+        value = self._take(name)
+        if value is _MISSING:
+            return default
+        if not isinstance(value, bool):
+            raise self.error(name, "须为 true 或 false")
+        return value
+
+    def positive_number(self, name: str) -> float:
+        value = self._required(name)
+        if isinstance(value, bool) or not isinstance(value, int | float) or value <= 0:
+            raise self.error(name, "须为正数")
+        return float(value)
+
+    def http_url(self, name: str) -> str:
+        value = self.text(name)
+        if not value.startswith(("http://", "https://")):
+            raise self.error(name, "须以 http:// 或 https:// 开头")
+        return value.rstrip("/")
+
+    def proxy_url_or(self, name: str, default: str) -> str:
+        """Optional proxy URL; the empty string means no proxy."""
+        value = self._take(name)
+        if value is _MISSING:
+            return default
+        if not isinstance(value, str):
+            raise self.error(name, "须为字符串")
+        text = value.strip()
+        if text and not text.startswith(("http://", "https://")):
+            raise self.error(name, "须为空或以 http:// 或 https:// 开头")
+        return text
+
+    def absolute_path(self, name: str) -> Path:
+        path = Path(self.text(name))
+        if not path.is_absolute():
+            raise self.error(name, "须为绝对路径")
+        return path
+
+    def path_under(self, name: str, base: Path) -> Path:
+        """Relative paths resolve against ``base`` (the config file's directory)."""
+        path = Path(self.text(name))
+        return path if path.is_absolute() else base / path
+
+    def secret_ref(self, name: str, source: _SecretSource) -> Secret:
+        value = self.text(name)
+        if not value.startswith(_SECRET_REF_PREFIX):
+            raise self.error(name, "须为 secret:<名称> 形式")
+        return source.resolve(value[len(_SECRET_REF_PREFIX) :], self.key(name))
+
+    def optional_sub(self, name: str) -> _Table | None:
+        value = self._take(name)
+        if value is _MISSING:
+            return None
+        if not isinstance(value, dict):
+            raise self.error(name, "须为配置节(表)")
+        return _Table(value, self.key(name))
 
     def close(self) -> None:
         extra = sorted(set(self._data) - self._seen)

@@ -72,5 +72,46 @@ skill_habits_per_member = 5 # 每位成员的习惯条数上限
 # language = "zh"
 # path_rules = [{ remote = "/远端数据目录", local = "/本机数据目录" }]
 
+# 编程代理(M5,可选)。省略整节 = 关闭。整节一经出现即完整校验(enabled = false 时亦然)。
+# 上游 Responses 地址与密钥取自 [provider];token_secret 与 imagegen.api_key 须为 "secret:<名>"。
+# [coding]
+# enabled = true
+# token_secret = "secret:coding_token"    # 沙箱令牌的 HMAC 密钥(在 secrets 中定义)
+# [coding.http]                           # 网关与桥接共用一个 HTTP 服务
+# host = "0.0.0.0"
+# port = 8000
+# public_base_url = "http://cgbot:8000"   # 沙箱与 NapCat 访问本服务的地址
+# [coding.docker]
+# host = "http://dsh-docker-proxy:2375"
+# sandbox_image = "cgbot-sandbox:latest"
+# network = "dsh_caged_internal"
+# host_data_dir = "/home/klp/cgbot-data"  # 宿主机绝对路径(容器内外须同一路径)
+# egress_proxy = ""                       # 可选;空 = 无代理
+# idle_seconds = 3600
+# container_prefix = "cgbot-sbx-"
+# [coding.codex]
+# model = "..."
+# reasoning_effort = "medium"
+# appserver_port = 8765
+# [coding.concurrency]
+# per_user = 4
+# degraded = 1
+# degrade_failures = 3
+# degrade_window_seconds = 60
+# recover_after_seconds = 3600
+# [coding.bridge]
+# max_file_bytes = 536870912
+# chunk_bytes = 2097152
+# temp_dir = "data/bridge"                 # 相对路径按配置文件目录解析
+# file_ttl_seconds = 86400
+# [coding.imagegen]                       # 可选;省略 = 图像生成不可用
+# base_url = "https://..."
+# api_key = "secret:imagegen_key"
+# model = "..."
+# mode = "..."
+# timeout_seconds = 600
+# proxy = ""
+# max_concurrency = 2
+
 [logging]
 level = "INFO"       # DEBUG / INFO / WARNING / ERROR / CRITICAL

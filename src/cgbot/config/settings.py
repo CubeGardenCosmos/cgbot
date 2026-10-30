@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Final, Literal
 
 if TYPE_CHECKING:
     # voice/config.py imports ConfigError from this module; a runtime import would be a cycle.
+    from cgbot.coding.config import CodingConfig
     from cgbot.voice.config import VoiceConfig
 
 Scope = Literal["private", "group"]
@@ -153,3 +154,4 @@ class Config:
     storage: StoragePaths
     logging: LoggingConfig
     voice: VoiceConfig | None = None  # None: [voice] table absent, voice disabled
+    coding: CodingConfig | None = None  # None: [coding] absent or enabled = false
