@@ -10,7 +10,7 @@
 - **质量工具**:`pytest` + `pytest-asyncio`,`ruff`(lint + format),类型检查 pyright 或 mypy 二选一(见下)。`[已定]`
 - 测试分层与标记:离线单元(默认运行,不联网)、真实边界集成(marker `integration`,默认跳过,须授权)、平台检查(marker `platform`)。对应 TODO 的 `-Unn/-Inn/-Cnn`。`[已定,标记名为推论]`
 
-## 推论(待确认,不阻塞 M1 起步)
+## 推论 → 第十七轮用户全部确认
 
 - 类型检查:选 **pyright**(strict 渐进)。理由:速度与 asyncio 推断较好;若用户偏好 mypy 再换。
 - 目录:`src/cgbot/{config,napcat,model,identity,session,provider,agent,tools,scheduler,memory,group,voice,coding}/`,与 DESIGN.md §10 模块图对应;适配器(napcat)与领域(agent/group/session)单向依赖,领域不得 import 适配器。
