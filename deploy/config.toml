@@ -43,6 +43,13 @@ skill_habits_per_member = 5
 
 # 语音未启用:省略 [voice]。启用前须确认 ASR/TTS 守护进程地址在容器内可达。
 
+[search]
+engines = ["bing", "baidu", "bilibili"]
+timeout_seconds = 30
+
+[search.gemini]
+enabled = false                           # 启用前需宿主机 omp-search-relay 运行并配置 token_ref
+
 [logging]
 level = "INFO"
 

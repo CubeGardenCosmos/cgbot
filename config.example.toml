@@ -113,5 +113,22 @@ skill_habits_per_member = 5 # 每位成员的习惯条数上限
 # proxy = ""
 # max_concurrency = 2
 
+# 网页搜索(web_search 工具)。省略整节 = 默认启用 bing/baidu/bilibili,无 Cookies。
+# [search]
+# engines = ["bing", "baidu", "bilibili"]   # 子集、不可重复;至少一个
+# default_engine = ""                       # 空 = 合并全部已启用引擎;或填其一
+# timeout_seconds = 30                      # 单次请求超时;引擎整体预算为其 2 倍
+# default_count = 5
+# max_count = 10
+# baidu_cookies_ref = "baidu_cookies"       # 可选;secrets 中的名称,值为浏览器 Cookie 串
+# bilibili_cookies_ref = "bilibili_cookies" # 可选;建议包含 buvid3
+#
+# [search.gemini]                           # 默认关闭;需宿主机 omp-search-relay 可达
+# enabled = false
+# endpoint = "http://<宿主机地址>:<端口>/search"   # 与 omp-search-relay 的监听地址一致
+# token_ref = "gemini_search_token"         # 启用时必填
+# model = "gemini-2.5-flash"
+# timeout_seconds = 90
+
 [logging]
 level = "INFO"       # DEBUG / INFO / WARNING / ERROR / CRITICAL

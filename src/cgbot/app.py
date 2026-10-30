@@ -47,6 +47,7 @@ from cgbot.omp.client import ClientFactory, default_client_factory
 from cgbot.provider import ModelProvider, Usage, user_message
 from cgbot.provider.tiers import effort_for
 from cgbot.scheduler import KIND_COMPACTION_IDLE, Scheduler, SystemEvent
+from cgbot.search import SearchService, search_tools
 from cgbot.session import AsyncSessionStore
 from cgbot.voice import (
     AsrClient,
@@ -240,6 +241,7 @@ class App:
             handler_timeout=SCHEDULER_HANDLER_TIMEOUT,
         )
         self._memory = MemoryBook(storage.for_module("memory"))
+        self._search = SearchService(config.search)
         # omp (ompweb) control plane: state lives in its own SQLite file; wakes re-enter privately.
         self._omp_store = OmpStore(storage.for_module("omp"))
         self._omp = OmpService(
@@ -280,6 +282,8 @@ class App:
         )
         registry = builtin_tools()
         for spec in memory_tools(self._memory):
+            registry.register(spec)
+        for spec in search_tools(self._search):
             registry.register(spec)
         if self._voice is not None:
             registry.register(self._send_voice_tool(self._voice))
@@ -357,6 +361,7 @@ class App:
         await self._sessions.close()
         await self._identity.close()
         await self._memory.close()
+        await self._search.close()
         self._group_state.close()
         self._group_skills.close()
         self._omp_store.close()

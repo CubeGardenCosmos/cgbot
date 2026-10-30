@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Final, Literal
 
@@ -145,6 +145,34 @@ class LoggingConfig:
     level: str
 
 
+SEARCH_ENGINE_NAMES: Final = ("bing", "baidu", "bilibili")
+
+
+@dataclass(frozen=True, slots=True)
+class SearchGeminiConfig:
+    """``[search.gemini]``: Gemini search through the host relay (disabled by default)."""
+
+    enabled: bool = False
+    endpoint: str = ""
+    token: Secret | None = None
+    model: str = "gemini-2.5-flash"
+    timeout_seconds: float = 90.0
+
+
+@dataclass(frozen=True, slots=True)
+class SearchConfig:
+    """``[search]``: web search engines and limits. Cookies are optional secret refs."""
+
+    engines: tuple[str, ...] = SEARCH_ENGINE_NAMES
+    default_engine: str = ""  # empty: merge all enabled engines
+    timeout_seconds: float = 30.0
+    default_count: int = 5
+    max_count: int = 10
+    baidu_cookies: Secret | None = None
+    bilibili_cookies: Secret | None = None
+    gemini: SearchGeminiConfig = field(default_factory=lambda: SearchGeminiConfig())
+
+
 @dataclass(frozen=True, slots=True)
 class Config:
     napcat: NapCatConfig
@@ -155,3 +183,4 @@ class Config:
     logging: LoggingConfig
     voice: VoiceConfig | None = None  # None: [voice] table absent, voice disabled
     coding: CodingConfig | None = None  # None: [coding] absent or enabled = false
+    search: SearchConfig = field(default_factory=lambda: SearchConfig())

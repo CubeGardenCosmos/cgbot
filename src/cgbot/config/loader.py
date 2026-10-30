@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Final
 
 from cgbot.config.settings import (
+    SEARCH_ENGINE_NAMES,
     WIRE_APIS,
     Config,
     ConfigError,
@@ -20,6 +21,8 @@ from cgbot.config.settings import (
     ProviderConfig,
     ReasoningTiers,
     ScopeConfig,
+    SearchConfig,
+    SearchGeminiConfig,
     Secret,
     StoragePaths,
     WireApi,
@@ -74,6 +77,7 @@ def load_config(
     group = _group(root.sub("group"))
     storage = _storage(root.sub("storage"), config_path.parent)
     logging_cfg = _logging(root.sub("logging"))
+    search = _search(root.sub("search"), source)
     voice_raw = root.raw_table("voice")
     coding_raw = root.raw_table("coding")
     root.close()
@@ -85,6 +89,7 @@ def load_config(
         group=group,
         storage=storage,
         logging=logging_cfg,
+        search=search,
         voice=load_voice_config(voice_raw) if voice_raw is not None else None,
         coding=(
             _coding(coding_raw, source, config_path.parent, provider.context_window)
@@ -181,6 +186,64 @@ def _logging(t: _Table) -> LoggingConfig:
         raise t.error("level", "须为 DEBUG/INFO/WARNING/ERROR/CRITICAL 之一")
     t.close()
     return LoggingConfig(level=level)
+
+
+def _search(t: _Table, source: _SecretSource) -> SearchConfig:
+    engines = t.text_list("engines", SEARCH_ENGINE_NAMES)
+    if not engines or any(name not in SEARCH_ENGINE_NAMES for name in engines):
+        raise t.error("engines", "须为 bing/baidu/bilibili 中的若干个（至少一个）")
+    default_engine = t.text_or("default_engine", "")
+    if default_engine and default_engine not in engines:
+        raise t.error("default_engine", "须为已启用的引擎之一")
+    timeout_seconds = t.positive_number_or("timeout_seconds", 30.0)
+    default_count = t.positive_int_or("default_count", 5)
+    max_count = t.positive_int_or("max_count", 10)
+    if default_count > max_count:
+        raise t.error("default_count", "不能大于 max_count")
+    baidu_ref = t.optional_text("baidu_cookies_ref")
+    baidu_cookies = (
+        None if baidu_ref is None else source.resolve(baidu_ref, t.key("baidu_cookies_ref"))
+    )
+    bilibili_ref = t.optional_text("bilibili_cookies_ref")
+    bilibili_cookies = (
+        None
+        if bilibili_ref is None
+        else source.resolve(bilibili_ref, t.key("bilibili_cookies_ref"))
+    )
+    gemini = _search_gemini(t.sub("gemini"), source)
+    t.close()
+    return SearchConfig(
+        engines=engines,
+        default_engine=default_engine,
+        timeout_seconds=timeout_seconds,
+        default_count=default_count,
+        max_count=max_count,
+        baidu_cookies=baidu_cookies,
+        bilibili_cookies=bilibili_cookies,
+        gemini=gemini,
+    )
+
+
+def _search_gemini(t: _Table, source: _SecretSource) -> SearchGeminiConfig:
+    enabled = t.bool_or("enabled", False)
+    endpoint = t.text_or("endpoint", "")
+    model = t.text_or("model", "gemini-2.5-flash")
+    timeout_seconds = t.positive_number_or("timeout_seconds", 90.0)
+    token_ref = t.optional_text("token_ref")
+    token = None if token_ref is None else source.resolve(token_ref, t.key("token_ref"))
+    if enabled:
+        if not endpoint.startswith(("http://", "https://")):
+            raise t.error("endpoint", "启用时须以 http:// 或 https:// 开头")
+        if token is None:
+            raise t.error("token_ref", "启用时必须配置")
+    t.close()
+    return SearchGeminiConfig(
+        enabled=enabled,
+        endpoint=endpoint,
+        token=token,
+        model=model,
+        timeout_seconds=timeout_seconds,
+    )
 
 
 def _coding(
