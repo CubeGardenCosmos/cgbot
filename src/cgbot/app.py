@@ -1,18 +1,17 @@
-"""M1 application wiring: NapCat ingress -> scope -> identity -> agent turn -> reply.
+"""Application wiring: NapCat ingress -> scope -> identity -> dispatcher -> agent turn -> reply.
 
-Private messages only. Turns run as background tasks so the NapCat dispatch loop never
-blocks on a model call or on the reply tool's send.
+Private messages only. The private dispatcher (R2.1/R2.2) decides when each turn starts. Turns
+run as background tasks so the NapCat dispatch loop never blocks on a model call or a send.
 """
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from collections.abc import Sequence
-from typing import Any
 
-from cgbot.agent import AgentRunner, TurnContext, builtin_tools
+from cgbot.agent import AgentRunner, builtin_tools
 from cgbot.config import Config
+from cgbot.dispatch import PrivateDispatcher, PrivateMessage, Timebase
 from cgbot.identity import AsyncIdentityStore
 from cgbot.model import (
     Channel,
@@ -63,9 +62,11 @@ def render_segments(segments: Sequence[Segment]) -> str:
 
 
 class App:
-    """Owns the M1 components and routes private messages into agent turns."""
+    """Owns the components and routes private input through the dispatcher into agent turns."""
 
-    def __init__(self, config: Config, provider: ModelProvider) -> None:
+    def __init__(
+        self, config: Config, provider: ModelProvider, *, timebase: Timebase | None = None
+    ) -> None:
         self._config = config
         storage = config.storage
         storage.data_dir.mkdir(parents=True, exist_ok=True)
@@ -90,8 +91,7 @@ class App:
             sender=self._send,
             reasoning_effort=config.provider.reasoning.private,
         )
-        self._turns: dict[str, asyncio.Task[None]] = {}
-        self._last_input: dict[str, float] = {}
+        self._dispatcher = PrivateDispatcher(self._runner, timebase)
         self._closing = False
 
     async def start(self) -> None:
@@ -102,12 +102,7 @@ class App:
     async def stop(self) -> None:
         self._closing = True
         await self.napcat.stop()
-        for sid, task in list(self._turns.items()):
-            if self._runner.is_running(sid):
-                self._runner.cancel(sid)
-            elif not task.done():
-                task.cancel()
-        await asyncio.gather(*self._turns.values(), return_exceptions=True)
+        await self._dispatcher.close()
         await self._scheduler.stop()
         self._scheduler.close()
         await self._sessions.close()
@@ -129,69 +124,25 @@ class App:
         channel = Channel("qq", message.user_id)
         identity = await self._identity.resolve(channel)
         session_id = await self._identity.private_session_id(identity.user_id)
-        ctx = TurnContext(
-            user_id=identity.user_id,
-            session_id=session_id,
-            source_channel=channel,
-            source_message_id=message.message_id,
-            new_items=[user_message(text)],
-            reason="user",
-            channels=identity.channels,
+        self._dispatcher.on_message(
+            PrivateMessage(
+                session_id=session_id,
+                user_id=identity.user_id,
+                message_id=message.message_id,
+                item=user_message(text),
+                channel=channel,
+                channels=identity.channels,
+            )
         )
-        await self._route(ctx)
 
     async def handle_input_status(self, status: InputStatus) -> None:
-        self._last_input[status.user_id] = status.time
-        log.debug(
-            "input status recorded: user_id=%s event_type=%s status_len=%d",
-            status.user_id,
-            status.event_type,
-            len(status.status_text),
-        )
-
-    def last_input_time(self, user_id: str) -> float | None:
-        return self._last_input.get(user_id)
-
-    async def _route(self, ctx: TurnContext) -> None:
-        sid = ctx.session_id
-        pending = self._turns.get(sid)
-        if pending is None or pending.done():
-            self._turns[sid] = self._spawn(sid, self._run(ctx))
-            return
-        if self._runner.inject(sid, ctx.new_items):
-            log.info("message injected into running turn: session=%s", sid)
-            return
-        # The running turn is ending: start a new turn once it has settled.
-        self._turns[sid] = self._spawn(sid, self._after(pending, ctx))
-
-    def _spawn(self, sid: str, coro: Any) -> asyncio.Task[None]:
-        task: asyncio.Task[None] = asyncio.create_task(coro, name=f"turn:{sid}")
-        task.add_done_callback(lambda t: self._forget(sid, t))
-        return task
-
-    def _forget(self, sid: str, task: asyncio.Task[None]) -> None:
-        if self._turns.get(sid) is task:
-            del self._turns[sid]
-
-    async def _after(self, prev: asyncio.Task[None], ctx: TurnContext) -> None:
-        await asyncio.wait({prev})
-        await self._run(ctx)
-
-    async def _run(self, ctx: TurnContext) -> None:
         if self._closing:
             return
-        try:
-            result = await self._runner.run_turn(ctx)
-        except Exception as exc:
-            log.error("turn crashed: session=%s error=%s", ctx.session_id, type(exc).__name__)
+        if not self._config.scope.allows("private", status.user_id, None):
             return
-        log.info(
-            "turn finished: session=%s status=%s tool_called=%s replies=%d",
-            ctx.session_id,
-            result.status,
-            result.tool_called,
-            result.replies_sent,
-        )
+        identity = await self._identity.resolve(Channel("qq", status.user_id))
+        session_id = await self._identity.private_session_id(identity.user_id)
+        self._dispatcher.on_typing(session_id)
 
     async def _send(self, message: OutboundMessage) -> SendResult:
         return await self.napcat.send(message)

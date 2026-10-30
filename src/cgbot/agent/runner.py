@@ -5,11 +5,15 @@ session store as it happens, so the history is always the source of truth. Plain
 stored (kind ``assistant``, ``internal``) and never sent; only the ``reply`` tool sends.
 
 Cancellation and injection (for R2.1/R2.2 steering):
-- ``cancel(session_id)`` cancels the running turn. Tool calls persisted without a result receive
-  a synthetic cancelled ``tool_result`` before the turn returns ``cancelled``.
-- ``inject(session_id, items)`` queues input items; they are appended before the next model
-  request of the running turn (after the tool results that precede them). If the model answers
-  without a tool call while items are queued, the loop continues so they are not dropped.
+- New items are persisted before the turn can be cancelled, so a cancelled turn never loses them;
+  a caller restarting after a cancel must pass only the items not yet passed to any turn.
+- ``cancel(session_id)`` cancels the running turn. If the turn is still persisting its new items,
+  the request is honoured right after persistence (no model call). Tool calls persisted without a
+  result receive a synthetic cancelled ``tool_result`` before the turn returns ``cancelled``.
+- ``inject(session_id, items, message_id=...)`` queues input items recorded with that message id;
+  they are appended before the next model request of the running turn (after the tool results
+  that precede them). If the model answers without a tool call while items are queued, the loop
+  continues so they are not dropped.
 """
 
 from __future__ import annotations
@@ -63,6 +67,8 @@ class TurnContext:
     new_items: list[dict[str, Any]]
     reason: Literal["user", "system_event"]
     channels: tuple[Channel, ...] = ()
+    # One source message id per ``new_items`` entry; empty means ``source_message_id`` for all.
+    new_message_ids: tuple[str | None, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -85,7 +91,7 @@ class _Turn:
     cancel_requested: bool = False
     # call_id -> tool name for calls persisted without a result yet, in call order.
     pending: dict[str, str] = field(default_factory=dict)
-    injected: list[dict[str, Any]] = field(default_factory=list)
+    injected: list[tuple[dict[str, Any], str | None]] = field(default_factory=list)
 
 
 def _describe(exc: BaseException) -> str:
@@ -113,14 +119,15 @@ class AgentRunner:
     async def run_turn(self, ctx: TurnContext) -> TurnResult:
         if ctx.reason not in ("user", "system_event"):
             raise ValueError(f"unknown turn reason: {ctx.reason!r}")
+        if ctx.new_message_ids and len(ctx.new_message_ids) != len(ctx.new_items):
+            raise ValueError("new_message_ids must align one to one with new_items")
         if ctx.session_id in self._turns:
             raise TurnInProgressError(f"a turn is already running for session {ctx.session_id}")
         turn = _Turn()
         self._turns[ctx.session_id] = turn
         try:
-            task = asyncio.create_task(self._drive(ctx, turn))
-            turn.task = task
-            result = await task
+            await self._persist_new_items(ctx)
+            result = await self._start(ctx, turn)
         finally:
             del self._turns[ctx.session_id]
         current = asyncio.current_task()
@@ -128,6 +135,29 @@ class AgentRunner:
             # The caller was cancelled while the turn settled; keep cancellation propagating.
             raise asyncio.CancelledError()
         return result
+
+    async def _persist_new_items(self, ctx: TurnContext) -> None:
+        kind: Kind = "user" if ctx.reason == "user" else "system_event"
+        channel = channel_key(ctx.source_channel)
+        ids = ctx.new_message_ids or (ctx.source_message_id,) * len(ctx.new_items)
+        for item, message_id in zip(ctx.new_items, ids, strict=True):
+            await self._append_item(
+                ctx.session_id, kind, item, {"message_id": message_id, "channel": channel}
+            )
+
+    async def _start(self, ctx: TurnContext, turn: _Turn) -> TurnResult:
+        if turn.cancel_requested:
+            return TurnResult("cancelled", False, 0)
+        task = asyncio.create_task(self._drive(ctx, turn))
+        turn.task = task
+        try:
+            return await task
+        except asyncio.CancelledError:
+            current = asyncio.current_task()
+            if current is not None and current.cancelling():
+                raise
+            # Cancelled before the task ever ran: nothing started, so nothing to settle.
+            return TurnResult("cancelled", False, 0)
 
     def is_running(self, session_id: str) -> bool:
         return session_id in self._turns
@@ -140,18 +170,26 @@ class AgentRunner:
     def cancel(self, session_id: str) -> bool:
         """Request cancellation of the running turn. False if none is running or stopping."""
         turn = self._turns.get(session_id)
-        if turn is None or turn.task is None or turn.task.done() or turn.cancel_requested:
+        if turn is None or turn.cancel_requested:
+            return False
+        if turn.task is None:
+            # Still persisting new items: honoured as soon as the task would start.
+            turn.cancel_requested = True
+            return True
+        if turn.task.done():
             return False
         turn.cancel_requested = True
         turn.task.cancel()
         return True
 
-    def inject(self, session_id: str, items: Sequence[dict[str, Any]]) -> bool:
+    def inject(
+        self, session_id: str, items: Sequence[dict[str, Any]], *, message_id: str | None = None
+    ) -> bool:
         """Queue input items for the running turn. False if no turn is accepting injections."""
         turn = self._turns.get(session_id)
         if turn is None or turn.task is None or turn.task.done() or turn.cancel_requested:
             return False
-        turn.injected.extend(copy.deepcopy(dict(item)) for item in items)
+        turn.injected.extend((copy.deepcopy(dict(item)), message_id) for item in items)
         return True
 
     async def _drive(self, ctx: TurnContext, turn: _Turn) -> TurnResult:
@@ -170,10 +208,6 @@ class AgentRunner:
 
     async def _loop(self, ctx: TurnContext, turn: _Turn) -> TurnResult:
         channels = available_channels(ctx.source_channel, ctx.channels)
-        kind: Kind = "user" if ctx.reason == "user" else "system_event"
-        meta = {"message_id": ctx.source_message_id, "channel": channel_key(ctx.source_channel)}
-        for item in ctx.new_items:
-            await self._append_item(ctx.session_id, kind, item, meta)
         await self._repair_unanswered(ctx.session_id)
 
         while True:
@@ -291,7 +325,8 @@ class AgentRunner:
         # Index-based so items queued during an await are picked up; each is removed only
         # after it is persisted, so a cancellation mid-way cannot drop it.
         while turn.injected:
-            await self._append_item(ctx.session_id, "user", turn.injected[0], {})
+            item, message_id = turn.injected[0]
+            await self._append_item(ctx.session_id, "user", item, {"message_id": message_id})
             turn.injected.pop(0)
 
     async def _load_input(self, session_id: str) -> list[dict[str, Any]]:

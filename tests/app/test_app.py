@@ -1,6 +1,7 @@
-"""M1 app wiring: scope drop, identity/session routing, reply, injection (offline).
+"""App wiring: scope drop, identity/session routing, dispatcher, reply (offline).
 
 No real NapCat or upstream: the provider is scripted and ``napcat.send`` is replaced by a fake.
+The dispatcher's clock is fake, so the 5 s quiet window is advanced explicitly.
 """
 
 from __future__ import annotations
@@ -8,7 +9,7 @@ from __future__ import annotations
 import asyncio
 import json
 import sqlite3
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from pathlib import Path
 from typing import Any
 
@@ -16,7 +17,8 @@ import pytest
 
 from cgbot.app import App, render_segments
 from cgbot.config import Config, load_config
-from cgbot.model import InboundMessage, InputStatus, OutboundMessage, Segment, SendResult
+from cgbot.dispatch import QUIET_SECONDS
+from cgbot.model import Channel, InboundMessage, InputStatus, OutboundMessage, Segment, SendResult
 from cgbot.provider import FunctionCall, ModelRequest, ModelResponse, TextOutput, Usage
 
 
@@ -50,6 +52,29 @@ IN_SCOPE = "1001"
 OUT_OF_SCOPE = "9999"
 
 
+class FakeTimebase:
+    """``advance`` moves time forward and wakes every sleeper whose deadline has passed."""
+
+    def __init__(self) -> None:
+        self._now = 0.0
+        self._sleepers: list[tuple[float, asyncio.Future[None]]] = []
+
+    def now(self) -> float:
+        return self._now
+
+    async def sleep(self, seconds: float) -> None:
+        future: asyncio.Future[None] = asyncio.get_running_loop().create_future()
+        self._sleepers.append((self._now + seconds, future))
+        await future
+
+    def advance(self, seconds: float) -> None:
+        self._now += seconds
+        for deadline, future in self._sleepers:
+            if deadline <= self._now and not future.done():
+                future.set_result(None)
+        self._sleepers = [(d, f) for d, f in self._sleepers if not f.done()]
+
+
 def make_config(tmp_path: Path) -> Config:
     secrets = tmp_path / "secrets.toml"
     secrets.write_text('[secrets]\nprovider_api_key = "sk-test-APP"\n', encoding="utf-8")
@@ -72,6 +97,10 @@ def private_msg(
         time=1_700_000_000.0,
         reply_to=reply_to,
     )
+
+
+def typing(user_id: str) -> InputStatus:
+    return InputStatus(user_id=user_id, event_type=1, status_text="对方正在输入", time=123.0)
 
 
 def calls_resp(*calls: tuple[str, str, dict[str, Any]]) -> ModelResponse:
@@ -149,9 +178,32 @@ def install(app: App, recorder: Recorder) -> None:
     app.napcat.send = recorder  # type: ignore[method-assign]
 
 
-async def settle(app: App) -> None:
-    while app._turns:  # noqa: SLF001 - test drains background turns
-        await asyncio.gather(*list(app._turns.values()))  # noqa: SLF001
+async def flush() -> None:
+    for _ in range(20):
+        await asyncio.sleep(0)
+
+
+async def wait_until(condition: Callable[[], bool]) -> None:
+    for _ in range(200):
+        if condition():
+            return
+        await asyncio.sleep(0)
+    raise AssertionError("condition not reached")
+
+
+async def settle(app: App, clock: FakeTimebase) -> None:
+    """Advance past quiet windows until the dispatcher has no lane left (turns finished)."""
+    for _ in range(100):
+        tasks = [
+            lane.task
+            for lane in app._dispatcher._lanes.values()  # noqa: SLF001 - test drains lanes
+            if lane.task is not None
+        ]
+        if not tasks:
+            return
+        clock.advance(QUIET_SECONDS)
+        await asyncio.wait(tasks, timeout=0.5)
+    raise AssertionError("app did not settle")
 
 
 def reply_script(text: str) -> list[ModelResponse]:
@@ -159,13 +211,14 @@ def reply_script(text: str) -> list[ModelResponse]:
 
 
 async def test_out_of_scope_private_is_dropped_before_identity_and_llm(tmp_path: Path) -> None:
+    clock = FakeTimebase()
     provider = ScriptedProvider()
-    app = App(make_config(tmp_path), provider)
+    app = App(make_config(tmp_path), provider, timebase=clock)
     recorder = Recorder()
     install(app, recorder)
 
     await app.handle_message(private_msg("m1", OUT_OF_SCOPE, "hi"))
-    await settle(app)
+    await settle(app, clock)
 
     assert provider.requests == []
     assert recorder.sent == []
@@ -174,8 +227,9 @@ async def test_out_of_scope_private_is_dropped_before_identity_and_llm(tmp_path:
 
 
 async def test_group_message_is_dropped(tmp_path: Path) -> None:
+    clock = FakeTimebase()
     provider = ScriptedProvider()
-    app = App(make_config(tmp_path), provider)
+    app = App(make_config(tmp_path), provider, timebase=clock)
     recorder = Recorder()
     install(app, recorder)
 
@@ -189,7 +243,7 @@ async def test_group_message_is_dropped(tmp_path: Path) -> None:
         reply_to=None,
     )
     await app.handle_message(group_msg)
-    await settle(app)
+    await settle(app, clock)
 
     assert provider.requests == []
     assert recorder.sent == []
@@ -197,13 +251,14 @@ async def test_group_message_is_dropped(tmp_path: Path) -> None:
 
 
 async def test_in_scope_private_reply_is_sent_via_reply_tool(tmp_path: Path) -> None:
+    clock = FakeTimebase()
     provider = ScriptedProvider(*reply_script("你好"))
-    app = App(make_config(tmp_path), provider)
+    app = App(make_config(tmp_path), provider, timebase=clock)
     recorder = Recorder()
     install(app, recorder)
 
     await app.handle_message(private_msg("m1", IN_SCOPE, "嗨"))
-    await settle(app)
+    await settle(app, clock)
 
     assert len(recorder.sent) == 1
     sent = recorder.sent[0]
@@ -217,15 +272,16 @@ async def test_in_scope_private_reply_is_sent_via_reply_tool(tmp_path: Path) -> 
 
 
 async def test_identity_and_session_are_created_once_per_user(tmp_path: Path) -> None:
+    clock = FakeTimebase()
     provider = ScriptedProvider(*reply_script("a"), *reply_script("b"))
-    app = App(make_config(tmp_path), provider)
+    app = App(make_config(tmp_path), provider, timebase=clock)
     recorder = Recorder()
     install(app, recorder)
 
     await app.handle_message(private_msg("m1", IN_SCOPE, "一"))
-    await settle(app)
+    await settle(app, clock)
     await app.handle_message(private_msg("m2", IN_SCOPE, "二"))
-    await settle(app)
+    await settle(app, clock)
 
     identity = await app._identity.resolve(_qq(IN_SCOPE))  # noqa: SLF001
     assert identity is not None
@@ -236,40 +292,67 @@ async def test_identity_and_session_are_created_once_per_user(tmp_path: Path) ->
     await app.stop()
 
 
-async def test_message_while_turn_running_is_injected(tmp_path: Path) -> None:
-    gate = asyncio.Event()
-    provider = ScriptedProvider(
-        calls_resp(("c1", "reply", {"text": "第一条回复"})),
-        text_resp("done"),
-        gate=gate,
-    )
-    app = App(make_config(tmp_path), provider)
+async def test_message_during_running_turn_interrupts_and_restarts_with_new_only(
+    tmp_path: Path,
+) -> None:
+    clock = FakeTimebase()
+    gate = asyncio.Event()  # never set: the first model call stays in flight until cancelled
+    provider = ScriptedProvider(*reply_script("收到"), gate=gate)
+    app = App(make_config(tmp_path), provider, timebase=clock)
     recorder = Recorder()
     install(app, recorder)
 
     await app.handle_message(private_msg("m1", IN_SCOPE, "第一条"))
-    await asyncio.sleep(0)
-    sid = f"private:{(await app._identity.resolve(_qq(IN_SCOPE))).user_id}"  # noqa: SLF001
-    assert app._runner.is_running(sid)  # noqa: SLF001
+    clock.advance(QUIET_SECONDS)
+    await wait_until(lambda: len(provider.requests) == 1)  # first model call is in flight
 
     await app.handle_message(private_msg("m2", IN_SCOPE, "第二条"))
-    gate.set()
-    await settle(app)
+    await settle(app, clock)
 
-    assert len(provider.requests) == 2
-    assert "第二条" in json.dumps(provider.requests[1].input, ensure_ascii=False)
-    assert [m.segments for m in recorder.sent] == [(Segment("text", {"text": "第一条回复"}),)]
+    assert len(provider.requests) == 3
+    restarted = json.dumps(provider.requests[1].input, ensure_ascii=False)
+    assert restarted.count("第一条") == 1
+    assert restarted.count("第二条") == 1
+    assert [m.segments for m in recorder.sent] == [(Segment("text", {"text": "收到"}),)]
     await app.stop()
 
 
-async def test_input_status_records_last_time(tmp_path: Path) -> None:
-    app = App(make_config(tmp_path), ScriptedProvider())
-    assert app.last_input_time(IN_SCOPE) is None
+async def test_typing_defers_turn_until_user_is_quiet(tmp_path: Path) -> None:
+    clock = FakeTimebase()
+    provider = ScriptedProvider(*reply_script("好"))
+    app = App(make_config(tmp_path), provider, timebase=clock)
+    install(app, Recorder())
 
-    await app.handle_input_status(
-        InputStatus(user_id=IN_SCOPE, event_type=1, status_text="对方正在输入", time=123.0)
-    )
-    assert app.last_input_time(IN_SCOPE) == 123.0
+    await app.handle_message(private_msg("m1", IN_SCOPE, "嗨"))  # quiet until t=5
+    clock.advance(4)
+    await app.handle_input_status(typing(IN_SCOPE))  # quiet until t=9
+    clock.advance(1)  # t=5: the old deadline passes, the lane re-arms
+    await flush()
+    clock.advance(3)  # t=8
+    await flush()
+    assert provider.requests == []
+
+    clock.advance(1)  # t=9
+    await settle(app, clock)
+    assert len(provider.requests) == 2
+    await app.stop()
+
+
+async def test_input_status_from_out_of_scope_user_is_ignored(tmp_path: Path) -> None:
+    config = make_config(tmp_path)
+    clock = FakeTimebase()
+    app = App(config, ScriptedProvider(), timebase=clock)
+
+    await app.handle_input_status(typing(OUT_OF_SCOPE))
+
+    assert app._dispatcher._lanes == {}  # noqa: SLF001
+    conn = sqlite3.connect(config.storage.profile)
+    try:
+        count = conn.execute("SELECT COUNT(*) FROM identity_channels").fetchone()
+    finally:
+        conn.close()
+    assert count is not None
+    assert count[0] == 0
     await app.stop()
 
 
@@ -313,9 +396,7 @@ def test_render_segments_text_and_placeholders() -> None:
     assert render_segments(()) == ""
 
 
-def _qq(account: str) -> Any:
-    from cgbot.model import Channel
-
+def _qq(account: str) -> Channel:
     return Channel("qq", account)
 
 

@@ -33,7 +33,7 @@ from cgbot.provider import (
     Usage,
     user_message,
 )
-from cgbot.session import AsyncSessionStore, Item
+from cgbot.session import AsyncSessionStore, Item, Kind
 
 SRC = Channel("qq", "10001")
 OTHER = Channel("qq", "20002")
@@ -675,3 +675,133 @@ async def test_outer_cancellation_propagates(store: AsyncSessionStore) -> None:
     assert runner.is_running(SID) is False
     results = [i for i in await rows(store) if i.kind == "tool_result"]
     assert results[0].payload["output"] == CANCELLED_OUTPUT
+
+
+class GatedUserStore(AsyncSessionStore):
+    """Holds the first user-item append until released, so a cancel can land mid-persist."""
+
+    def __init__(self, path: Path) -> None:
+        super().__init__(path)
+        self.entered = asyncio.Event()
+        self.release = asyncio.Event()
+
+    async def append(self, session_id: str, kind: Kind, payload: dict[str, Any]) -> int:
+        if kind == "user" and not self.entered.is_set():
+            self.entered.set()
+            await self.release.wait()
+        return await super().append(session_id, kind, payload)
+
+
+class HangFirstProvider(ScriptedProvider):
+    """The first model call blocks until cancelled; later calls answer from the script."""
+
+    def __init__(self, started: asyncio.Event, *script: ModelResponse) -> None:
+        super().__init__(*script)
+        self._started = started
+
+    async def respond(self, request: ModelRequest) -> ModelResponse:
+        if not self.requests:
+            self.requests.append(request)
+            self._started.set()
+            await asyncio.Event().wait()
+        return await super().respond(request)
+
+
+async def test_cancel_while_persisting_skips_model_and_keeps_item(tmp_path: Path) -> None:
+    store = GatedUserStore(tmp_path / "session.sqlite")
+    try:
+        provider = ScriptedProvider(text_resp("never"))
+        runner = make_runner(store, provider, RecordingSender())
+        task = asyncio.create_task(runner.run_turn(turn("first")))
+        await store.entered.wait()
+        assert runner.is_running(SID) is True
+        assert runner.cancel(SID) is True
+        store.release.set()
+
+        result = await task
+
+        assert result.status == "cancelled"
+        assert provider.requests == []
+        users = [i.payload["item"] for i in await rows(store) if i.kind == "user"]
+        assert users == [user_message("first")]
+    finally:
+        await store.close()
+
+
+async def test_interrupted_turn_restarts_with_only_new_items(store: AsyncSessionStore) -> None:
+    started = asyncio.Event()
+    provider = HangFirstProvider(started, text_resp("reply"))
+    runner = make_runner(store, provider, RecordingSender())
+
+    task = asyncio.create_task(runner.run_turn(turn("first", message_id="m1")))
+    await started.wait()
+    assert runner.cancel(SID) is True
+    assert (await task).status == "cancelled"
+
+    result = await runner.run_turn(turn("second", message_id="m2"))
+
+    assert result.status == "completed"
+    sent_input = provider.requests[1].input
+    assert sent_input.count(user_message("first")) == 1
+    assert sent_input.count(user_message("second")) == 1
+    stored = [
+        (i.payload["message_id"], i.payload["item"]) for i in await rows(store) if i.kind == "user"
+    ]
+    assert stored == [("m1", user_message("first")), ("m2", user_message("second"))]
+
+
+async def test_inject_records_message_id(store: AsyncSessionStore) -> None:
+    async def steer(ctx: ToolContext, args: dict[str, Any]) -> ToolResult:
+        assert runner.inject(SID, [user_message("extra")], message_id="m-extra") is True
+        return ToolResult("ok")
+
+    registry = builtin_tools()
+    registry.register(simple_tool("steer", steer))
+    provider = ScriptedProvider(calls_resp(("c1", "steer", {})), text_resp("done"))
+    runner = make_runner(store, provider, RecordingSender(), registry)
+
+    await runner.run_turn(turn())
+
+    injected = [
+        i.payload
+        for i in await rows(store)
+        if i.kind == "user" and i.payload["item"] == user_message("extra")
+    ]
+    assert [p["message_id"] for p in injected] == ["m-extra"]
+
+
+async def test_new_message_ids_are_stored_per_item(store: AsyncSessionStore) -> None:
+    runner = make_runner(store, ScriptedProvider(text_resp("ok")), RecordingSender())
+    ctx = TurnContext(
+        user_id=USER,
+        session_id=SID,
+        source_channel=SRC,
+        source_message_id="m2",
+        new_items=[user_message("a"), user_message("b")],
+        reason="user",
+        new_message_ids=("m1", "m2"),
+    )
+
+    await runner.run_turn(ctx)
+
+    stored = [
+        (i.payload["message_id"], i.payload["item"]) for i in await rows(store) if i.kind == "user"
+    ]
+    assert stored == [("m1", user_message("a")), ("m2", user_message("b"))]
+
+
+async def test_new_message_ids_must_match_items(store: AsyncSessionStore) -> None:
+    runner = make_runner(store, ScriptedProvider(), RecordingSender())
+    ctx = TurnContext(
+        user_id=USER,
+        session_id=SID,
+        source_channel=SRC,
+        source_message_id="m1",
+        new_items=[user_message("a")],
+        reason="user",
+        new_message_ids=("m1", "m2"),
+    )
+
+    with pytest.raises(ValueError):
+        await runner.run_turn(ctx)
+    assert await rows(store) == []
