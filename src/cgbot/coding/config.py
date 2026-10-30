@@ -15,7 +15,7 @@ TOML shape (parsed by ``cgbot.config.loader`` into :class:`CodingConfig`)::
     host = "http://dsh-docker-proxy:2375"
     sandbox_image = "cgbot-sandbox:latest"
     network = "dsh_caged_internal"
-    host_data_dir = "/home/klp/cgbot-data"    # absolute HOST path; mounted at the same path in the bot
+    host_data_dir = "/home/klp/cgbot-data"    # absolute HOST path, same path inside the bot
     egress_proxy = "http://dsh-egress:7890"
     idle_seconds = 3600
     container_prefix = "cgbot-sbx-"
