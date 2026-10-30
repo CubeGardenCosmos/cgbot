@@ -11,6 +11,9 @@ owns the decision of when the next turn starts:
   is interrupted and the message waits for the quiet window; the restarted turn carries only the
   messages not yet passed to any turn, so no user message is stored twice.
 
+Background wakes (``on_wake``) are system-originated and never interrupt or inject. They join the
+lane queue and run after the running turn and the quiet window, like any other message.
+
 Messages are never reordered: injection only happens when nothing is waiting in the lane.
 """
 
@@ -39,7 +42,7 @@ class PrivateMessage:
 
     session_id: str
     user_id: str
-    message_id: str
+    message_id: str | None  # None for background wakes
     item: dict[str, Any]
     channel: Channel
     channels: tuple[Channel, ...]
@@ -84,11 +87,7 @@ class PrivateDispatcher:
             log.info("private message dropped during shutdown: message_id=%s", message.message_id)
             return
         sid = message.session_id
-        lane = self._lanes.get(sid)
-        if lane is None:
-            lane = _Lane(session_id=sid)
-            self._lanes[sid] = lane
-            lane.task = asyncio.create_task(self._drive(lane), name=f"private:{sid}")
+        lane = self._lane_for(sid)
         lane.last_event = self._time.now()
         if self._runner.is_running(sid):
             if (
@@ -104,6 +103,27 @@ class PrivateDispatcher:
                 log.info("running turn interrupted for new message: session=%s", sid)
             return
         lane.pending.append(message)
+
+    def on_wake(self, message: PrivateMessage) -> None:
+        """System-originated input (background wake). Never interrupts or injects.
+
+        The wake joins the lane queue. A running turn is left alone: the wake runs after that turn
+        and the quiet window.
+        """
+        if self._closing:
+            log.info("private wake dropped during shutdown: session=%s", message.session_id)
+            return
+        lane = self._lane_for(message.session_id)
+        lane.pending.append(message)
+        lane.last_event = self._time.now()
+
+    def _lane_for(self, sid: str) -> _Lane:
+        lane = self._lanes.get(sid)
+        if lane is None:
+            lane = _Lane(session_id=sid)
+            self._lanes[sid] = lane
+            lane.task = asyncio.create_task(self._drive(lane), name=f"private:{sid}")
+        return lane
 
     async def close(self) -> None:
         """Cancel every lane (and the turn it runs). Messages not yet started are dropped."""

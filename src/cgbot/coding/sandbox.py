@@ -341,7 +341,7 @@ class DockerSandboxProvider:
                 "Binds": binds,
                 "NetworkMode": network,
                 "CapDrop": ["ALL"],
-                "SecurityOpt": ["no-new-privileges:true"],
+                "SecurityOpt": ["no-new-privileges:true", "label=disable"],
                 "PidsLimit": PIDS_LIMIT,
                 "Memory": MEM_LIMIT_BYTES,
                 "NanoCpus": NANO_CPUS,

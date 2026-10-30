@@ -24,7 +24,7 @@ services:
     # Root inside the container is required to chown per-user workspaces (old manager pattern).
     cap_drop: [ALL]
     cap_add: [CHOWN, DAC_OVERRIDE, FOWNER]
-    security_opt: ["no-new-privileges:true"]
+    security_opt: ["no-new-privileges:true", "label:disable"]   # SELinux host: bind mounts (as the old manager)
     pids_limit: 512
     mem_limit: 1g
     cpus: 2

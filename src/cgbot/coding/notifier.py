@@ -1,8 +1,9 @@
 """QQ delivery of Coding Agent notices (M5 R5.4).
 
 ``QqNotifier`` implements ``contracts.CodingNotifier``: each notice is sent as one private QQ
-message to the owning user, then recorded as a ``system_event`` in that user's session history
-(payload metadata only, no body, so the model never sees it as conversation input).
+message to the owning user, then recorded as a ``system_event`` in that user's session history.
+The record carries the model-visible form of the notice (``item``, a user-role input item built
+by ``model_text``), so the next turn of that session sees it. Recording never starts a turn.
 
 Delivery never raises: the manager and the bridge both call ``notify`` from background paths, and
 a failed send must not affect turn bookkeeping. Logs carry kind and exception type only.
@@ -10,12 +11,14 @@ a failed send must not affect turn bookkeeping. Logs carry kind and exception ty
 
 from __future__ import annotations
 
+import dataclasses
 import logging
 from collections.abc import Awaitable, Callable
 
 from cgbot.coding.contracts import CodingNotice, FileKind, NoticeKind, ReportStatus, StoredFile
 from cgbot.memory.domain import PRIVATE_SESSION_PREFIX
 from cgbot.model import OutboundMessage, Segment, SendResult
+from cgbot.provider import user_message
 from cgbot.session import AsyncSessionStore
 
 log = logging.getLogger(__name__)
@@ -24,6 +27,8 @@ Sender = Callable[[OutboundMessage], Awaitable[SendResult]]
 
 TEXT_LIMIT = 4000
 SESSION_EVENT = "coding_notice"
+MODEL_TEXT_LIMIT = 1500
+NOTICE_PREFIX = "[系统通知] "
 
 _HEADERS: dict[NoticeKind, str] = {
     "report": "进度汇报",
@@ -74,6 +79,17 @@ def render_notice(notice: CodingNotice) -> tuple[Segment, ...]:
     return tuple(segments)
 
 
+def model_text(notice: CodingNotice, delivered: bool) -> str:
+    """Model-visible form of a notice: clipped QQ text plus attachment names (never URLs)."""
+    clipped = dataclasses.replace(notice, text=_clip(notice.text, MODEL_TEXT_LIMIT))
+    state = "已送达用户" if delivered else "未能送达用户"
+    body = str(render_notice(clipped)[0].data["text"])
+    lines = [f"{NOTICE_PREFIX}Coding Agent 通知（{state}）", body]
+    if notice.files:
+        lines.append("附件：" + "、".join(stored.name for stored in notice.files))
+    return "\n".join(lines)
+
+
 class QqNotifier:
     """Sends notices to the owning user's private chat and records them in session history."""
 
@@ -111,6 +127,7 @@ class QqNotifier:
             "status": notice.status,
             "files": len(notice.files),
             "delivered": delivered,
+            "item": user_message(model_text(notice, delivered)),
         }
         try:
             await self._sessions.append(

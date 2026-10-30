@@ -87,7 +87,7 @@ async def test_container_spec_pins_binds_limits_and_single_network(tmp_path: Pat
     assert not any("docker.sock" in bind for bind in host["Binds"])
     assert set(host["Tmpfs"]) == {"/tmp"}
     assert host["CapDrop"] == ["ALL"]
-    assert host["SecurityOpt"] == ["no-new-privileges:true"]
+    assert host["SecurityOpt"] == ["no-new-privileges:true", "label=disable"]
     assert host["PidsLimit"] == 512
     assert host["Memory"] == 2 * 1024**3
     assert host["NanoCpus"] == 2_000_000_000

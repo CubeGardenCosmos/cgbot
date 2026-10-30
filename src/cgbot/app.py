@@ -42,6 +42,8 @@ from cgbot.model import (
     SendResult,
 )
 from cgbot.napcat import NapCatServer
+from cgbot.omp import OmpService, OmpStore
+from cgbot.omp.client import ClientFactory, default_client_factory
 from cgbot.provider import ModelProvider, Usage, user_message
 from cgbot.provider.tiers import effort_for
 from cgbot.scheduler import KIND_COMPACTION_IDLE, Scheduler, SystemEvent
@@ -67,6 +69,7 @@ MEMORY_HEADER = "以下是你已记住的关于该用户的信息:"
 SCHEDULER_HANDLER_TIMEOUT = 30.0  # round 20: per-attempt timeout
 GROUP_SWEEP_SECONDS = 30.0
 RECORD_FAILED = "[语音识别失败]"
+PRIVATE_NOTICE_PREFIX = "[系统通知] "
 _GROUP_TRIGGERS: Mapping[str, GroupTrigger] = {
     "wake": "wake",
     "followup": "followup",
@@ -203,7 +206,12 @@ class App:
     """Owns the components and routes input through the dispatcher or group sessions."""
 
     def __init__(
-        self, config: Config, provider: ModelProvider, *, timebase: Timebase | None = None
+        self,
+        config: Config,
+        provider: ModelProvider,
+        *,
+        timebase: Timebase | None = None,
+        omp_http_client_factory: ClientFactory = default_client_factory,
     ) -> None:
         self._config = config
         storage = config.storage
@@ -217,6 +225,13 @@ class App:
             handler_timeout=SCHEDULER_HANDLER_TIMEOUT,
         )
         self._memory = MemoryBook(storage.for_module("memory"))
+        # omp (ompweb) control plane: state lives in its own SQLite file; wakes re-enter privately.
+        self._omp_store = OmpStore(storage.for_module("omp"))
+        self._omp = OmpService(
+            self._omp_store,
+            http_client_factory=omp_http_client_factory,
+            on_wake=self.wake_private,
+        )
         token = config.napcat.token.reveal() if config.napcat.token is not None else None
         self.napcat = NapCatServer(
             config.napcat.host,
@@ -256,6 +271,9 @@ class App:
         if self._coding is not None:
             for spec in self._coding.tools:
                 registry.register(spec)
+        # omp tools are private-only: the group registry is built separately and never sees them.
+        for spec in self._omp.tools():
+            registry.register(spec)
         self._runner = AgentRunner(
             provider=provider,
             store=self._sessions,
@@ -303,6 +321,7 @@ class App:
         await self._groups.restore()
         if self._coding is not None:
             await self._coding.start()
+        await self._omp.start()
         await self.napcat.start()
         await self._scheduler.start()
         self._sweep_task = asyncio.create_task(self._sweep_loop(), name="group-sweep")
@@ -315,6 +334,7 @@ class App:
         await self.napcat.stop()
         await self._dispatcher.close()
         await _cancel_tasks(list(self._tasks))
+        await self._omp.close()
         if self._coding is not None:
             await self._coding.stop()
         await self._scheduler.stop()
@@ -324,6 +344,7 @@ class App:
         await self._memory.close()
         self._group_state.close()
         self._group_skills.close()
+        self._omp_store.close()
         if self._voice is not None:
             for service in self._voice.services:
                 await service.aclose()
@@ -363,6 +384,31 @@ class App:
         identity = await self._identity.resolve(Channel("qq", status.user_id))
         session_id = await self._identity.private_session_id(identity.user_id)
         self._dispatcher.on_typing(session_id)
+
+    async def wake_private(self, user_id: str, text: str) -> None:
+        """Deliver a background notice (e.g. an omp report) into a user's private session.
+
+        Enqueues and returns at once: the turn runs in the private lane after any running turn,
+        never interrupting it. Unknown users are logged and dropped.
+        """
+        if self._closing:
+            return
+        identity = await self._identity.identity_for_user(user_id)
+        if identity is None:
+            log.warning("private wake dropped: unknown user")
+            return
+        session_id = await self._identity.private_session_id(identity.user_id)
+        channel = await self._identity.preferred_channel(identity.user_id)
+        self._dispatcher.on_wake(
+            PrivateMessage(
+                session_id=session_id,
+                user_id=identity.user_id,
+                message_id=None,
+                item=user_message(PRIVATE_NOTICE_PREFIX + text),
+                channel=channel,
+                channels=identity.channels,
+            )
+        )
 
     async def _handle_group(self, message: InboundMessage) -> None:
         gid = message.group_id
