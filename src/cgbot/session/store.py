@@ -181,6 +181,36 @@ class SessionStore:
             raise SessionStoreError("insert returned no seq")
         return seq
 
+    def append_if_last(
+        self, session_id: str, expected_last_seq: int, kind: Kind, payload: dict[str, Any]
+    ) -> int | None:
+        """Like ``append``, but only if the session's newest seq is ``expected_last_seq``.
+
+        The check and the insert share one ``BEGIN IMMEDIATE`` transaction, so no other
+        append can land between them. Returns None (nothing written) on mismatch.
+        Used by compaction to commit against the window it summarised (0 = empty session).
+        """
+        _check_session_id(session_id)
+        _check_record(kind, payload)
+        if kind == "tool_result":
+            raise ValueError("append_if_last does not accept tool_result rows")
+        text = _dump(payload)
+        with self._lock, self._transaction() as conn:
+            row = conn.execute(
+                "SELECT COALESCE(MAX(seq), 0) FROM session_items WHERE session_id = ?",
+                (session_id,),
+            ).fetchone()
+            if int(row[0]) != expected_last_seq:
+                return None
+            cur = conn.execute(
+                "INSERT INTO session_items (session_id, kind, payload, ts) VALUES (?, ?, ?, ?)",
+                (session_id, kind, text, time.time()),
+            )
+            seq = cur.lastrowid
+        if seq is None:
+            raise SessionStoreError("insert returned no seq")
+        return seq
+
     def _spill_if_large(self, payload: dict[str, Any]) -> dict[str, Any]:
         raw = cast(str, payload["output"]).encode("utf-8")
         if len(raw) <= self._limit:
@@ -272,6 +302,13 @@ class AsyncSessionStore:
 
     async def append(self, session_id: str, kind: Kind, payload: dict[str, Any]) -> int:
         return await asyncio.to_thread(self._store.append, session_id, kind, payload)
+
+    async def append_if_last(
+        self, session_id: str, expected_last_seq: int, kind: Kind, payload: dict[str, Any]
+    ) -> int | None:
+        return await asyncio.to_thread(
+            self._store.append_if_last, session_id, expected_last_seq, kind, payload
+        )
 
     async def load(self, session_id: str, after_seq: int = 0) -> list[Item]:
         return await asyncio.to_thread(self._store.load, session_id, after_seq)
