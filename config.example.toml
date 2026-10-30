@@ -1,0 +1,47 @@
+# cgbot 配置示例。复制为本地配置文件(如 config.toml)后修改;该本地文件不入库。
+#
+# 密钥只在此处写引用名,值不写在本文件。取值顺序:
+#   1. 环境变量 CGBOT_SECRET_<名字大写>(优先)
+#   2. secrets 文件的 [secrets] 表;路径由 load_config 参数或环境变量 CGBOT_SECRETS_FILE 指定,
+#      权限须为 0600,且不入库。示例(值为占位):
+#        [secrets]
+#        provider_api_key = "<填入真实密钥>"
+#
+# 未知键、缺失必填项、非法取值都会启动失败,错误信息给出键路径。
+
+[napcat]
+# 框架是 WebSocket 服务端,NapCat 以反向 WS 客户端连入。
+host = "127.0.0.1"   # 监听地址;NapCat 与框架不同机时改为内网地址或 0.0.0.0
+port = 6199          # 必填
+path = "/ws"         # 默认 /ws
+# token_ref = "napcat_token"  # 可选;引用 secrets 中的密钥名。省略则不校验令牌
+
+[scope]
+# 服务范围白名单。范围外的私聊/群消息在进入业务与 LLM 之前丢弃。
+# 私聊:发送者须在 friends;群聊:群号须在 groups(群内任何成员均在范围内)。
+# 省略整节 = 全部拒绝。
+friends = []         # 好友 QQ 号,纯数字,例:[10000000001, 10000000002]
+groups = []          # 固定群号,纯数字
+# owner = 10000000000  # 可选:主人 QQ 号,仅作身份标记,不会自动加入白名单
+
+[provider]
+base_url = "https://example.invalid/v1"  # OpenAI Responses 兼容上游;请求 {base_url}/responses
+model = "your-model-name"
+api_key_ref = "provider_api_key"         # 密钥引用名,值见文件头说明
+
+[provider.reasoning]
+# 各用途的推理档位,原样透传给上游(上游对档位取值的支持待实测)。
+summary = "low"      # 压缩摘要
+private = "high"     # 日常私聊
+planning = "max"     # 任务规划(设计待定)
+group = "low"        # 群聊轮次
+
+[storage]
+data_dir = "data"    # 相对本配置文件所在目录;运行时数据,不入库
+
+[group]
+wake_keywords = ["大肥鱼"]  # 唤醒关键词:@ 机器人且消息含关键词才唤醒
+mute_keywords = []          # 闭嘴关键词,默认为空(具体规则在群聊里程碑中确定)
+
+[logging]
+level = "INFO"       # DEBUG / INFO / WARNING / ERROR / CRITICAL
