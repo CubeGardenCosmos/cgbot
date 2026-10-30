@@ -17,7 +17,7 @@ richdoc /workspace/artifacts/<name>.md /workspace/artifacts/<name>.png
 richdoc input.md [output.png|output.pdf] [--format png|pdf|both] [--output-dir DIR]
 ```
 
-3. Open every returned PNG yourself (see checklist below). Fix content or layout and re-render until clean.
+3. Review the result (see checklist below). The model behind this sandbox is text-only: do NOT try to open or view PNGs (the `view_image` tool is unavailable and image input can hang the model). Review the Markdown source and richdoc's reported errors/warnings instead, fix and re-render until clean.
 4. Deliver through the bridge MCP tool `report_progress`, passing the PNG/PDF paths printed by richdoc in the `files` array as absolute paths, e.g. `/workspace/artifacts/<name>.png`. Delivered paths MUST be inside `/workspace` or `/home/agent`; the bridge rejects others.
 
 Example delivery arguments:
@@ -97,7 +97,7 @@ Render an example to check the toolchain: `richdoc /opt/cgbot/tools/richdoc/exam
 
 ## Manual review before delivery
 
-Open every returned PNG, not only the first split image. Check:
+Without image input, check the source and richdoc's output for every split image. Check:
 
 - text and labels do not overflow; cards and sections are not cut off;
 - Chinese and other glyphs are readable, with no replacement characters or tofu;
@@ -106,4 +106,4 @@ Open every returned PNG, not only the first split image. Check:
 - every user-requested data item is present with real observation or trading dates, units and sources, or is explicitly marked unavailable;
 - split boundaries and uncertainty wording are correct.
 
-If anything fails, fix the content or layout, re-render, and view every resulting PNG again. A clean `errors: []` is not a substitute for visual review. Report only checks you actually performed.
+If anything fails, fix the content or layout and re-render. Never claim a visual check you did not perform; state that the layout was verified structurally, not by eye.
