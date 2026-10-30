@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Final
 
 from cgbot.config.settings import (
+    WIRE_APIS,
     Config,
     ConfigError,
     GroupConfig,
@@ -20,7 +21,8 @@ from cgbot.config.settings import (
     ReasoningTiers,
     ScopeConfig,
     Secret,
-    StorageConfig,
+    StoragePaths,
+    WireApi,
 )
 
 SECRETS_FILE_ENV: Final = "CGBOT_SECRETS_FILE"
@@ -42,7 +44,9 @@ def load_config(
     Secrets come from the secrets TOML (``[secrets]`` table) and can be overridden per name by
     ``CGBOT_SECRET_<NAME>`` in ``env``. The secrets file is ``secrets_path``, else
     ``$CGBOT_SECRETS_FILE``; it must be mode 0600. Relative ``storage.data_dir`` is resolved
-    against the config file's directory. Loading happens once; there is no hot reload.
+    against the config file's directory; each domain gets its own SQLite file under it
+    (``profile.sqlite``, ``sessions.sqlite``, ``scheduler.sqlite``, ``<module>.sqlite``), and
+    files are never shared. Loading happens once; there is no hot reload.
 
     Raises:
         ConfigError: missing/invalid/unknown key, unreadable file, or unresolved secret.
@@ -102,6 +106,10 @@ def _provider(t: _Table, source: _SecretSource) -> ProviderConfig:
     model = t.text("model")
     context_window = t.positive_int("context_window")
     api_key = source.resolve(t.text("api_key_ref"), t.key("api_key_ref"))
+    wire_text = t.text_or("wire_api", "responses")
+    if wire_text not in WIRE_APIS:
+        raise t.error("wire_api", "须为 responses 或 chat")
+    wire_api: WireApi = "chat" if wire_text == "chat" else "responses"
 
     defaults = ReasoningTiers()
     tiers = t.sub("reasoning")
@@ -119,6 +127,7 @@ def _provider(t: _Table, source: _SecretSource) -> ProviderConfig:
         context_window=context_window,
         api_key=api_key,
         reasoning=reasoning,
+        wire_api=wire_api,
     )
 
 
@@ -129,10 +138,10 @@ def _group(t: _Table) -> GroupConfig:
     return GroupConfig(wake_keywords=wake, mute_keywords=mute)
 
 
-def _storage(t: _Table, base_dir: Path) -> StorageConfig:
+def _storage(t: _Table, base_dir: Path) -> StoragePaths:
     data_dir = t.text_or("data_dir", "data")
     t.close()
-    return StorageConfig(data_dir=base_dir / data_dir)
+    return StoragePaths(data_dir=base_dir / data_dir)
 
 
 def _logging(t: _Table) -> LoggingConfig:

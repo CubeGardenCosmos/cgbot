@@ -120,6 +120,20 @@ def test_relative_data_dir_is_relative_to_config_file(tmp_path: Path, secrets_fi
     assert cfg.storage.data_dir == tmp_path / "runtime"
 
 
+def test_storage_lays_out_one_file_per_domain(tmp_path: Path, secrets_file: Path) -> None:
+    toml = BASE_TOML + '\n[storage]\ndata_dir = "runtime"\n'
+    cfg = load_with(tmp_path, toml, secrets_file)
+    data = tmp_path / "runtime"
+    assert cfg.storage.profile == data / "profile.sqlite"
+    assert cfg.storage.sessions == data / "sessions.sqlite"
+    assert cfg.storage.scheduler == data / "scheduler.sqlite"
+    assert cfg.storage.for_module("memory") == data / "memory.sqlite"
+    assert len({cfg.storage.profile, cfg.storage.sessions, cfg.storage.scheduler}) == 3
+    for bad in ("", ".", "..", "a/b", "a\\b"):
+        with pytest.raises(ValueError):
+            cfg.storage.for_module(bad)
+
+
 def test_owner_is_optional_and_parsed(tmp_path: Path, secrets_file: Path) -> None:
     toml = edit(BASE_TOML, "friends = [1001", 'owner = "3003"\nfriends = [1001')
     cfg = load_with(tmp_path, toml, secrets_file)
@@ -410,3 +424,22 @@ def test_config_is_frozen(tmp_path: Path, secrets_file: Path) -> None:
         cfg.napcat.port = 1  # type: ignore[misc]
     with pytest.raises(dataclasses.FrozenInstanceError):
         cfg.scope = cfg.scope  # type: ignore[misc]
+
+
+def test_wire_api_defaults_to_responses(tmp_path: Path, secrets_file: Path) -> None:
+    cfg = load_with(tmp_path, BASE_TOML, secrets_file)
+    assert cfg.provider.wire_api == "responses"
+
+
+@pytest.mark.parametrize("value", ["responses", "chat"])
+def test_wire_api_accepts_known_values(tmp_path: Path, secrets_file: Path, value: str) -> None:
+    toml = edit(BASE_TOML, "model = ", f'wire_api = "{value}"\nmodel = ')
+    cfg = load_with(tmp_path, toml, secrets_file)
+    assert cfg.provider.wire_api == value
+
+
+def test_wire_api_unknown_value_is_named(tmp_path: Path, secrets_file: Path) -> None:
+    toml = edit(BASE_TOML, "model = ", 'wire_api = "grpc"\nmodel = ')
+    with pytest.raises(ConfigError) as info:
+        load_with(tmp_path, toml, secrets_file)
+    assert info.value.key == "provider.wire_api"

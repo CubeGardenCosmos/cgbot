@@ -16,8 +16,10 @@ Concurrency: one connection per store guarded by a ``threading.Lock``. Every wri
 runs in ``BEGIN IMMEDIATE`` so get-or-create is atomic across threads and across
 processes sharing the DB file; the ``UNIQUE(kind, account)`` constraint is the backstop.
 
-The schema shares the DB file with sessions/scheduler: it uses its own tables and a
-``schema_version`` row for component ``identity``.
+Storage (round 20): this store owns ``profile.sqlite`` under the storage data dir — user
+profile/config data only. Chat records (sessions) and other modules use their own files; this
+schema never shares a database file with them. It keeps a ``schema_version`` row for component
+``identity``.
 """
 
 from __future__ import annotations

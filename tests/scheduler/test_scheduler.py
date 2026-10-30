@@ -2,13 +2,17 @@ from __future__ import annotations
 
 import asyncio
 import math
+import sqlite3
 from collections.abc import AsyncIterator, Callable
 from pathlib import Path
 from typing import Any
 
 import pytest
 
+from cgbot.config import StoragePaths
 from cgbot.scheduler import (
+    DEFAULT_HANDLER_TIMEOUT,
+    DEFAULT_MAX_ATTEMPTS,
     KIND_BACKGROUND_NOTICE,
     KIND_COMPACTION_IDLE,
     Scheduler,
@@ -21,6 +25,17 @@ from cgbot.session import SessionStore
 # Safety net for awaits on the loop; never used as a sleep.
 TIMEOUT = 5.0
 EIGHT_HOURS = 8 * 3600.0
+
+
+def _tables(path: Path) -> set[str]:
+    conn = sqlite3.connect(path)
+    try:
+        rows = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
+        ).fetchall()
+    finally:
+        conn.close()
+    return {str(r[0]) for r in rows}
 
 
 class FakeClock:
@@ -87,7 +102,7 @@ async def settle() -> None:
 
 @pytest.fixture
 def db_path(tmp_path: Path) -> Path:
-    return tmp_path / "data" / "cgbot.sqlite"
+    return tmp_path / "data" / "scheduler.sqlite"
 
 
 @pytest.fixture
@@ -348,7 +363,7 @@ async def test_handler_failure_keeps_event_pending_and_retries_with_bounded_back
     assert s.pending() == []
 
 
-async def test_failing_head_blocks_later_events_until_it_succeeds(
+async def test_failing_head_does_not_block_later_due_events(
     db_path: Path,
     clock: FakeClock,
     sleep: FakeSleep,
@@ -361,13 +376,170 @@ async def test_failing_head_blocks_later_events_until_it_succeeds(
     tail = s.schedule("k", "u2", {"n": 2}, due_at=clock.now)
     await s.start()
 
+    # The head is backing off for 10 s; the tail is already due, so it runs first.
+    assert (await deliveries.next_delivery()).event_id == tail
     delay, fut = await sleep.next_call()
     assert delay == pytest.approx(10.0)
-    assert deliveries.events == []  # tail must not overtake the failed head
+    assert [e.event_id for e in s.pending()] == [head]
     clock.now += delay
     fut.set_result(None)
     assert (await deliveries.next_delivery()).event_id == head
+    assert s.pending() == []
+
+
+async def test_event_becomes_failed_after_five_attempts_and_is_reported_once(
+    db_path: Path,
+    clock: FakeClock,
+    sleep: FakeSleep,
+    deliveries: Deliveries,
+    make: Callable[..., Scheduler],
+) -> None:
+    dead: list[tuple[SystemEvent, str]] = []
+
+    async def handler(event: SystemEvent) -> None:
+        if event.event_id == eid:
+            raise RuntimeError("always fails")
+        await deliveries(event)
+
+    s = make(
+        db_path,
+        handler,
+        clock,
+        sleep,
+        retry_base_delay=10.0,
+        on_dead=lambda event, error: dead.append((event, error)),
+    )
+    # The poisoned event is due first but keeps failing; the tail is due 5 s later.
+    eid = s.schedule("k", "u1", {"secret": "body"}, due_at=clock.now)
+    tail = s.schedule("k", "u2", {}, due_at=clock.now + 5.0)
+    await s.start()
+
+    # Startup: sleep to the tail's due time (attempt 1 of the head already failed and is
+    # backing off for 10 s, which must not delay the tail).
+    delay, fut = await sleep.next_call()
+    assert delay == pytest.approx(5.0)
+    clock.now += delay
+    fut.set_result(None)
     assert (await deliveries.next_delivery()).event_id == tail
+
+    for expected in (5.0, 20.0, 40.0, 80.0):  # backoff after attempts 1..4 (base 10 s)
+        delay, fut = await sleep.next_call()
+        assert delay == pytest.approx(expected)
+        assert [e.event_id for e in s.pending()] == [eid]  # still pending while backing off
+        assert dead == []
+        clock.now += delay
+        fut.set_result(None)
+        await settle()
+
+    # Fifth attempt failed: the event is failed, not pending, and reported exactly once.
+    assert s.pending() == []
+    failed = s.failed()
+    assert [f.event.event_id for f in failed] == [eid]
+    assert failed[0].attempts == 5
+    assert failed[0].last_error == "RuntimeError"
+    assert [(e.event_id, err) for e, err in dead] == [(eid, "RuntimeError")]
+    # Exhausted events do not come back and do not hold the loop.
+    await settle()
+    assert sleep.calls.empty()
+    # A failed event stays inspectable but cannot be cancelled or moved.
+    assert s.cancel(eid) is False
+    assert s.reschedule(eid, clock.now) is False
+
+
+async def test_handler_timeout_counts_as_a_failed_attempt(
+    db_path: Path,
+    clock: FakeClock,
+    sleep: FakeSleep,
+    make: Callable[..., Scheduler],
+) -> None:
+    hangs = 0
+    dead: list[str] = []
+
+    async def never_returns(event: SystemEvent) -> None:
+        nonlocal hangs
+        hangs += 1
+        await asyncio.Event().wait()  # blocks until the handler timeout cancels it
+
+    s = make(
+        db_path,
+        never_returns,
+        clock,
+        sleep,
+        max_attempts=2,
+        handler_timeout=0.01,  # real 10 ms so the test needs no wall-clock wait
+        retry_base_delay=3.0,
+        on_dead=lambda event, error: dead.append(error),
+    )
+    eid = s.schedule("k", "u1", {}, due_at=clock.now)
+    await s.start()
+
+    delay, fut = await sleep.next_call()  # attempt 1 timed out; backoff on the fake clock
+    assert delay == pytest.approx(3.0)
+    assert hangs == 1
+    assert dead == []
+    clock.now += delay  # fake clock: the backoff itself costs no wall-clock time
+    fut.set_result(None)
+    await asyncio.sleep(0.05)  # let the second 10 ms handler timeout really expire
+    assert hangs == 2
+    assert s.pending() == []
+    assert [(f.event.event_id, f.attempts, f.last_error) for f in s.failed()] == [
+        (eid, 2, "TimeoutError")
+    ]
+    assert dead == ["TimeoutError"]
+
+
+async def test_attempt_counts_survive_restart_and_exhausted_stays_failed(
+    db_path: Path,
+    clock: FakeClock,
+    sleep: FakeSleep,
+    make: Callable[..., Scheduler],
+) -> None:
+    d1 = Deliveries()
+    d1.failures = 100
+    s1 = make(db_path, d1, clock, sleep, retry_base_delay=10.0)
+    eid = s1.schedule("k", "u1", {}, due_at=clock.now)
+    await s1.start()
+    delay, fut = await sleep.next_call()
+    assert delay == pytest.approx(10.0)  # attempt 1 already failed
+    clock.now += delay
+    fut.set_result(None)
+    delay, _ = await sleep.next_call()
+    assert delay == pytest.approx(20.0)  # attempt 2 already failed
+    await s1.stop()
+    s1.close()
+
+    # Restart: the two used attempts still count, so only three remain.
+    d2 = Deliveries()
+    d2.failures = 100
+    dead: list[str] = []
+    s2 = make(
+        db_path, d2, clock, sleep, retry_base_delay=10.0, on_dead=lambda e, err: dead.append(err)
+    )
+    await s2.start()
+    # The persisted retry waits 20 s (attempt 2), then attempts 3 and 4 back off 40 s and 80 s.
+    for expected in (20.0, 40.0, 80.0):
+        delay, fut = await sleep.next_call()
+        assert delay == pytest.approx(expected)
+        clock.now += delay
+        fut.set_result(None)
+        await settle()
+    # Attempt 5 exhausts the budget: failed on restart, without a sixth run.
+    assert d2.attempts == 3
+    assert [(f.event.event_id, f.attempts) for f in s2.failed()] == [(eid, 5)]
+    assert dead == ["RuntimeError"]
+    await s2.stop()
+    s2.close()
+
+    # A later restart keeps it failed: never pending, never delivered again.
+    d3 = Deliveries()
+    s3 = make(db_path, d3, clock, sleep)
+    assert s3.pending() == []
+    assert [(f.event.event_id, f.attempts) for f in s3.failed()] == [(eid, 5)]
+    await s3.start()
+    await settle()
+    assert sleep.calls.empty()
+    assert d3.attempts == 0
+    assert s3.pending() == []
 
 
 async def test_stop_is_clean_while_sleeping_and_idempotent(
@@ -469,19 +641,43 @@ async def test_invalid_arguments_are_rejected(
     assert s.pending() == []
 
 
-async def test_scheduler_shares_database_file_with_session_store(
-    db_path: Path,
+def test_round_twenty_defaults_and_argument_validation(
+    tmp_path: Path, deliveries: Deliveries
+) -> None:
+    assert DEFAULT_MAX_ATTEMPTS == 5
+    assert DEFAULT_HANDLER_TIMEOUT == 30.0
+    db = tmp_path / "scheduler.sqlite"
+    Scheduler(db, deliveries).close()
+    with pytest.raises(ValueError):
+        Scheduler(db, deliveries, max_attempts=0)
+    with pytest.raises(TypeError):
+        Scheduler(db, deliveries, max_attempts=True)  # type: ignore[arg-type]
+    for bad_timeout in (0.0, -1.0, math.inf):
+        with pytest.raises(ValueError):
+            Scheduler(db, deliveries, handler_timeout=bad_timeout)
+
+
+async def test_scheduler_and_session_store_use_distinct_files(
+    tmp_path: Path,
     clock: FakeClock,
     sleep: FakeSleep,
     deliveries: Deliveries,
 ) -> None:
-    store = SessionStore(db_path)
-    s = Scheduler(db_path, deliveries, clock=clock, sleep=sleep)
+    """Round 20: no shared database, so neither store can see or damage the other."""
+    paths = StoragePaths(tmp_path / "data")
+    assert paths.profile != paths.sessions != paths.scheduler
+    store = SessionStore(paths.sessions)
+    s = Scheduler(paths.scheduler, deliveries, clock=clock, sleep=sleep)
     try:
         store.append("private:u1", "user", {"text": "hi"})
         eid = s.schedule(KIND_COMPACTION_IDLE, "u1", {}, due_at=clock.now + EIGHT_HOURS)
-        items = store.load("private:u1")
-        assert [(i.seq, i.kind) for i in items] == [(1, "user")]
+        assert [(i.seq, i.kind) for i in store.load("private:u1")] == [(1, "user")]
+        assert [e.event_id for e in s.pending()] == [eid]
+        # Each file holds only its own module's tables.
+        assert _tables(paths.sessions) == {"schema_version", "session_items"}
+        assert _tables(paths.scheduler) == {"schema_version", "scheduled_events"}
+        # Closing one store leaves the other fully usable.
+        store.close()
         assert [e.event_id for e in s.pending()] == [eid]
     finally:
         s.close()

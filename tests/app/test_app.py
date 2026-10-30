@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import sqlite3
 from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
@@ -17,6 +18,18 @@ from cgbot.app import App, render_segments
 from cgbot.config import Config, load_config
 from cgbot.model import InboundMessage, InputStatus, OutboundMessage, Segment, SendResult
 from cgbot.provider import FunctionCall, ModelRequest, ModelResponse, TextOutput, Usage
+
+
+def _tables(path: Path) -> set[str]:
+    conn = sqlite3.connect(path)
+    try:
+        rows = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
+        ).fetchall()
+    finally:
+        conn.close()
+    return {str(r[0]) for r in rows}
+
 
 BASE_TOML = """
 [napcat]
@@ -263,6 +276,29 @@ async def test_input_status_records_last_time(tmp_path: Path) -> None:
 async def test_stop_without_start_is_clean(tmp_path: Path) -> None:
     app = App(make_config(tmp_path), ScriptedProvider())
     await app.stop()
+
+
+async def test_app_wires_one_database_file_per_domain(tmp_path: Path) -> None:
+    """Round 20: profile / sessions / scheduler each get their own SQLite file."""
+    config = make_config(tmp_path)
+    app = App(config, ScriptedProvider())
+    try:
+        data_dir = config.storage.data_dir
+        assert sorted(p.name for p in data_dir.glob("*.sqlite")) == [
+            "profile.sqlite",
+            "scheduler.sqlite",
+            "sessions.sqlite",
+        ]
+        assert not (data_dir / "cgbot.sqlite").exists()  # the old shared file is gone
+        assert _tables(config.storage.profile) == {
+            "identity_channels",
+            "identities",
+            "schema_version",
+        }
+        assert _tables(config.storage.sessions) == {"schema_version", "session_items"}
+        assert _tables(config.storage.scheduler) == {"scheduled_events", "schema_version"}
+    finally:
+        await app.stop()
 
 
 def test_render_segments_text_and_placeholders() -> None:

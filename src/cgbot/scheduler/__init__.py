@@ -6,11 +6,20 @@ from cgbot.scheduler.events import (
     SystemEvent,
     SystemEventQueue,
 )
-from cgbot.scheduler.scheduler import Scheduler, SchedulerError
+from cgbot.scheduler.scheduler import (
+    DEFAULT_HANDLER_TIMEOUT,
+    DEFAULT_MAX_ATTEMPTS,
+    FailedEvent,
+    Scheduler,
+    SchedulerError,
+)
 
 __all__ = [
     "KIND_BACKGROUND_NOTICE",
     "KIND_COMPACTION_IDLE",
+    "DEFAULT_HANDLER_TIMEOUT",
+    "DEFAULT_MAX_ATTEMPTS",
+    "FailedEvent",
     "Scheduler",
     "SchedulerError",
     "SystemEvent",

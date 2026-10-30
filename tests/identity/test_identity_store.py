@@ -26,7 +26,7 @@ QQ_B = Channel("qq", "10002")
 
 @pytest.fixture
 def db_path(tmp_path: Path) -> Path:
-    return tmp_path / "data" / "cgbot.sqlite"
+    return tmp_path / "data" / "profile.sqlite"
 
 
 @pytest.fixture

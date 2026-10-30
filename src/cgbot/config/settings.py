@@ -4,9 +4,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import Final, Literal
 
 Scope = Literal["private", "group"]
+WireApi = Literal["responses", "chat"]
+WIRE_APIS: Final = ("responses", "chat")
 
 
 class ConfigError(Exception):
@@ -78,13 +80,14 @@ class ReasoningTiers:
 
 @dataclass(frozen=True, slots=True)
 class ProviderConfig:
-    """Single model provider (OpenAI Responses compatible upstream)."""
+    """Single model provider; ``wire_api`` selects Responses or Chat Completions on the upstream."""
 
     base_url: str
     model: str
     context_window: int
     api_key: Secret
     reasoning: ReasoningTiers
+    wire_api: WireApi = "responses"  # wire format: Responses (default) or Chat Completions
 
 
 @dataclass(frozen=True, slots=True)
@@ -96,8 +99,33 @@ class GroupConfig:
 
 
 @dataclass(frozen=True, slots=True)
-class StorageConfig:
+class StoragePaths:
+    """Per-domain SQLite files under ``data_dir`` (round 20: no shared database).
+
+    User profile/config data (identity, channels) go to ``profile.sqlite``; chat records go
+    to ``sessions.sqlite``; every other module owns its own file (``scheduler.sqlite`` today,
+    memory later). Modules never open a file belonging to another domain.
+    """
+
     data_dir: Path
+
+    @property
+    def profile(self) -> Path:
+        return self.data_dir / "profile.sqlite"
+
+    @property
+    def sessions(self) -> Path:
+        return self.data_dir / "sessions.sqlite"
+
+    @property
+    def scheduler(self) -> Path:
+        return self.data_dir / "scheduler.sqlite"
+
+    def for_module(self, name: str) -> Path:
+        """Own file for a future module (e.g. ``for_module("memory")``)."""
+        if not name or name in {".", ".."} or any(c in name for c in "/\\:"):
+            raise ValueError(f"invalid storage module name: {name!r}")
+        return self.data_dir / f"{name}.sqlite"
 
 
 @dataclass(frozen=True, slots=True)
@@ -111,5 +139,5 @@ class Config:
     scope: ScopeConfig
     provider: ProviderConfig
     group: GroupConfig
-    storage: StorageConfig
+    storage: StoragePaths
     logging: LoggingConfig

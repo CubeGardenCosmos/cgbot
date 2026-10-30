@@ -29,7 +29,6 @@ from cgbot.session import AsyncSessionStore
 
 log = logging.getLogger(__name__)
 
-DB_FILE = "cgbot.sqlite"
 SPILL_DIR = "spill"
 
 SYSTEM_PROMPT = (
@@ -68,12 +67,12 @@ class App:
 
     def __init__(self, config: Config, provider: ModelProvider) -> None:
         self._config = config
-        data_dir = config.storage.data_dir
-        data_dir.mkdir(parents=True, exist_ok=True)
-        db = data_dir / DB_FILE
-        self._sessions = AsyncSessionStore(db, spill_dir=data_dir / SPILL_DIR)
-        self._identity = AsyncIdentityStore(db)
-        self._scheduler = Scheduler(db, self._on_system_event)
+        storage = config.storage
+        storage.data_dir.mkdir(parents=True, exist_ok=True)
+        # Round 20: one SQLite file per domain; no store opens another module's file.
+        self._sessions = AsyncSessionStore(storage.sessions, spill_dir=storage.data_dir / SPILL_DIR)
+        self._identity = AsyncIdentityStore(storage.profile)
+        self._scheduler = Scheduler(storage.scheduler, self._on_system_event)
         token = config.napcat.token.reveal() if config.napcat.token is not None else None
         self.napcat = NapCatServer(
             config.napcat.host,

@@ -19,3 +19,10 @@
 - 密钥:secrets 文件权限 0600;配置里只引用密钥名;`omp_add` 私聊录入的主机/密码是已定流程,存入 data/ 下受限权限文件,不进日志与记忆本。
 - 提交前检查:`uv run ruff check`、`uv run ruff format --check`、`uv run pyright`、`uv run pytest`。
 - 仓库忽略:`data/`、`secrets*`、`.venv/`、`__pycache__/`、`*.sqlite*`。
+
+## 存储(第二十轮 `[已定]`)
+
+- 每个域一个独立的 SQLite 文件,全部位于 `storage.data_dir` 下;模块之间不共用库文件。由 `config.StoragePaths` 给出路径:`profile.sqlite`(身份、入口等用户资料与配置相关)、`sessions.sqlite`(聊天记录/会话日志)、`scheduler.sqlite`(调度器系统事件);后续模块(如记忆本)用 `StoragePaths.for_module("memory")` 取自己的 `<模块名>.sqlite`。
+- 各库在 `schema_version(component, version)` 里登记自己的组件与版本;版本高于代码支持的版本时拒绝打开。一个模块不得读写另一模块的表或文件。
+- 单连接 + `threading.Lock` 串行化进程内读写,`PRAGMA journal_mode=WAL`、`synchronous=FULL`;每次写入独立提交。
+- 迁移策略:尚无。开发期库结构变更时可直接丢弃旧库文件,不写兼容层;进入验收后需另立迁移约定。
