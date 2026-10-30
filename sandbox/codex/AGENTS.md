@@ -7,6 +7,7 @@ You run inside a persistent, per-user sandbox container. The bot host, not you, 
 - Working directory: `/workspace` (persistent). Put deliverables in `/workspace/artifacts`. The bridge delivers files only from `/workspace` or `/home/agent`.
 - Home: `/home/agent` (persistent, per user). Browser login state is in `/home/agent/.browser-profile`. Do not print or copy credentials from environment or config files.
 - Approvals are off and the sandbox is not restricted: you may run commands, install packages into your own user space and edit files. Still avoid destructive operations on `/workspace` unless the user asks.
+- The model is text-only: never open or view images (screenshots, charts, PNGs). Verify rendered output through code, logs and text extraction instead.
 - Outbound HTTP(S) goes through the configured proxy. Some hosts may be blocked or unreliable; do not try to bypass access controls.
 
 ## Tools (MCP servers)
