@@ -121,7 +121,12 @@ def make_config(tmp_path: Path) -> CodingConfig:
             idle_seconds=600.0,
             container_prefix="cgbot-sbx-",
         ),
-        codex=CodexConfig(model="test-model", reasoning_effort="medium", appserver_port=8765),
+        codex=CodexConfig(
+            model="test-model",
+            reasoning_effort="medium",
+            appserver_port=8765,
+            context_window=128000,
+        ),
         concurrency=ConcurrencyConfig(
             per_user=4,
             degraded=1,
@@ -492,6 +497,78 @@ async def test_thread_id_forwarded_from_meta(harness: Harness, key: str) -> None
     assert notice.thread_id == "thr-forward"
     assert notice.status == "running"
     assert notice.files == ()
+    await proc.close()
+
+
+# Shape observed on codex-cli 0.166.0 stdio tools/call (docs/reference/codex-appserver-notes.md
+# section (d)): top-level threadId/sessionId/windowId/callId/itemId/progressToken plus
+# x-codex-turn-metadata. No io.modelcontextprotocol/protocolVersion key, i.e. the legacy path.
+CODEX_META = {
+    "threadId": "thr-codex",
+    "sessionId": "thr-codex",
+    "windowId": "thr-codex:0",
+    "callId": "call-1",
+    "itemId": "item-1",
+    "progressToken": "tok-1",
+    "x-codex-turn-metadata": {
+        "thread_id": "thr-codex",
+        "session_id": "thr-codex",
+        "turn_id": "turn-1",
+        "model": "test-model",
+        "sandbox_mode": "danger-full-access",
+        "codex_version": "0.166.0",
+        "turn_started_at_unix_ms": 1700000000000,
+    },
+}
+
+
+async def test_codex_meta_shape_forwards_thread_id(harness: Harness) -> None:
+    proc = await spawn(harness)
+    response = await proc.tool(
+        "report_progress", {"message": "codex", "status": "running"}, meta=CODEX_META
+    )
+    assert not is_error(response), text_of(response)
+    assert text_of(response) == "reported: status=running files=0"
+    (notice,) = harness.notifier.notices
+    assert notice.thread_id == "thr-codex"
+    assert notice.user_id == USER
+    await proc.close()
+
+
+async def test_turn_metadata_thread_id_is_used_when_top_level_missing(harness: Harness) -> None:
+    proc = await spawn(harness)
+    meta = {"x-codex-turn-metadata": {"thread_id": "thr-turn", "turn_id": "turn-9"}}
+    response = await proc.tool("report_progress", {"message": "turn"}, meta=meta)
+    assert not is_error(response), text_of(response)
+    (notice,) = harness.notifier.notices
+    assert notice.thread_id == "thr-turn"
+    await proc.close()
+
+
+async def test_top_level_thread_id_wins_over_turn_metadata(harness: Harness) -> None:
+    proc = await spawn(harness)
+    meta = {"threadId": "thr-top", "x-codex-turn-metadata": {"thread_id": "thr-turn"}}
+    response = await proc.tool("report_progress", {"message": "both"}, meta=meta)
+    assert not is_error(response), text_of(response)
+    (notice,) = harness.notifier.notices
+    assert notice.thread_id == "thr-top"
+    await proc.close()
+
+
+async def test_overlong_thread_id_is_dropped_not_sent(harness: Harness) -> None:
+    proc = await spawn(harness)
+    response = await proc.tool("report_progress", {"message": "long"}, meta={"threadId": "t" * 257})
+    assert not is_error(response), text_of(response)
+    (notice,) = harness.notifier.notices
+    assert notice.thread_id is None
+    await proc.close()
+
+
+async def test_codex_meta_without_protocol_key_uses_legacy_path(harness: Harness) -> None:
+    proc = await spawn(harness)
+    response = await proc.call("tools/list", {"_meta": {"threadId": "thr-codex"}}, request_id=7)
+    assert "result" in response
+    assert "resultType" not in response["result"]
     await proc.close()
 
 

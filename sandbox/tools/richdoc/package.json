@@ -1,0 +1,26 @@
+{
+  "name": "cgbot-richdoc",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "richdoc": "bin/richdoc.js"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.js"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "@fontsource/noto-sans-sc": "5.2.8",
+    "echarts": "5.6.0",
+    "katex": "0.16.22",
+    "markdown-it": "14.1.0",
+    "mermaid": "11.12.1",
+    "pdf-lib": "1.17.1",
+    "playwright": "1.56.1",
+    "sanitize-html": "2.17.0",
+    "sharp": "0.34.4"
+  }
+}

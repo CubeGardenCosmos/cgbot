@@ -313,6 +313,7 @@ class DockerSandboxProvider:
             "CGBOT_APPSERVER_PORT": str(self._config.codex.appserver_port),
             "CGBOT_MODEL": self._config.codex.model,
             "CGBOT_REASONING_EFFORT": self._config.codex.reasoning_effort,
+            "CGBOT_CONTEXT_WINDOW": str(self._config.codex.context_window),
         }
         proxy = self._config.docker.egress_proxy
         if proxy:

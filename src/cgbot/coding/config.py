@@ -24,6 +24,7 @@ TOML shape (parsed by ``cgbot.config.loader`` into :class:`CodingConfig`)::
     model = "deepseek-v4.1-flash"
     reasoning_effort = "medium"
     appserver_port = 8765
+    context_window = 128000                   # optional; defaults to [provider].context_window
 
     [coding.concurrency]
     per_user = 4
@@ -82,6 +83,7 @@ class CodexConfig:
     model: str
     reasoning_effort: str
     appserver_port: int
+    context_window: int  # defaults to [provider].context_window
 
 
 @dataclass(frozen=True, slots=True)

@@ -1,0 +1,37 @@
+# Preinstalled into the default image-wide Python, not Debian's PEP 668 environment.
+# Use the image's Aliyun index; no browser download or duplicate Chromium bundle.
+pandas
+numpy
+scipy
+matplotlib
+plotly
+seaborn
+Pillow
+opencv-python-headless
+scikit-learn
+requests
+httpx
+aiohttp
+beautifulsoup4
+lxml
+html5lib
+pyyaml
+openpyxl
+xlsxwriter
+python-docx
+python-pptx
+reportlab
+pypdf
+pdfplumber
+markdown
+jinja2
+tabulate
+tqdm
+akshare
+yfinance
+mplfinance
+pyarrow
+sqlalchemy
+cryptography
+playwright
+pytesseract

@@ -86,7 +86,11 @@ def load_config(
         storage=storage,
         logging=logging_cfg,
         voice=load_voice_config(voice_raw) if voice_raw is not None else None,
-        coding=_coding(coding_raw, source, config_path.parent) if coding_raw is not None else None,
+        coding=(
+            _coding(coding_raw, source, config_path.parent, provider.context_window)
+            if coding_raw is not None
+            else None
+        ),
     )
 
 
@@ -180,7 +184,7 @@ def _logging(t: _Table) -> LoggingConfig:
 
 
 def _coding(
-    raw: Mapping[str, object], source: _SecretSource, base_dir: Path
+    raw: Mapping[str, object], source: _SecretSource, base_dir: Path, context_window: int
 ) -> CodingConfig | None:
     """``[coding]``: fully validated even when ``enabled = false``; disabled returns None."""
     # Lazy import: coding/config.py imports cgbot.config.settings, and importing cgbot.config runs
@@ -219,6 +223,7 @@ def _coding(
         model=codex_t.text("model"),
         reasoning_effort=codex_t.text("reasoning_effort"),
         appserver_port=codex_t.port("appserver_port"),
+        context_window=codex_t.positive_int_or("context_window", context_window),
     )
     codex_t.close()
 

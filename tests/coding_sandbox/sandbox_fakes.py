@@ -61,7 +61,9 @@ def make_config(
             idle_seconds=idle_seconds,
             container_prefix="cgbot-sbx-",
         ),
-        codex=CodexConfig(model=model, reasoning_effort="medium", appserver_port=8765),
+        codex=CodexConfig(
+            model=model, reasoning_effort="medium", appserver_port=8765, context_window=128000
+        ),
         concurrency=ConcurrencyConfig(
             per_user=1,
             degraded=1,

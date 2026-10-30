@@ -70,7 +70,9 @@ def make_config(
             idle_seconds=60.0,
             container_prefix="cgbot-test-",
         ),
-        codex=CodexConfig(model="test-model", reasoning_effort="low", appserver_port=8765),
+        codex=CodexConfig(
+            model="test-model", reasoning_effort="low", appserver_port=8765, context_window=128000
+        ),
         concurrency=ConcurrencyConfig(
             per_user=1,
             degraded=1,

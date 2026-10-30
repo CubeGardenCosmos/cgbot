@@ -1,0 +1,73 @@
+:root {
+  color-scheme: light;
+  font-family: "Noto Sans CJK SC", "Noto Sans SC", sans-serif;
+  font-size: 22px;
+  color: #17243b;
+  background: #fff;
+  font-synthesis: none;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; width: 540px; min-height: 1px; }
+body { font-size: 22px; line-height: 1.65; overflow-wrap: anywhere; }
+.rr-report { padding: 26px 24px 32px; }
+h1, h2, h3, h4, h5, h6 { line-height: 1.3; color: #102c50; margin: 1em 0 .5em; break-after: avoid; }
+h1 { font-size: 36px; }
+h2 { font-size: 30px; }
+h3 { font-size: 26px; }
+h4, h5, h6 { font-size: 24px; }
+p, ul, ol, blockquote, pre, table, figure { margin: 0 0 18px; }
+li { margin: 6px 0; }
+a { color: #1559a6; text-decoration: underline; }
+strong { font-weight: 700; }
+small, .rr-muted, .rr-caption { font-size: 22px; color: #52647a; }
+blockquote { margin-left: 0; padding: 10px 16px; border-left: 4px solid #4c83c5; background: #f1f6fc; }
+code, pre { font-family: "Noto Sans Mono CJK SC", monospace; font-size: 20px; }
+code { background: #eff3f8; border-radius: 4px; padding: 1px 4px; }
+pre { white-space: pre-wrap; overflow-wrap: anywhere; padding: 14px; background: #eff3f8; border-radius: 10px; }
+pre code { padding: 0; background: none; }
+table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 22px; }
+th, td { border: 1px solid #d5deeb; padding: 9px 8px; text-align: left; vertical-align: top; overflow-wrap: anywhere; }
+th { background: #eaf1fa; font-weight: 700; }
+tr:nth-child(even) td { background: #f7f9fc; }
+.rr-card { border: 1px solid #d9e3ef; border-radius: 14px; padding: 18px; margin: 0 0 20px; background: #f8fafd; }
+.rr-card > :first-child, .rr-report > :first-child { margin-top: 0; }
+.rr-card > :last-child { margin-bottom: 0; }
+.rr-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
+.rr-chart { width: 100%; height: 380px; margin: 8px 0 0; overflow: hidden; break-inside: avoid; }
+.rr-chart svg { display: block; }
+.rr-kline svg { width: 100%; height: auto; }
+.mermaid { background: #fff; padding: 8px 0; text-align: center; }
+.mermaid svg { max-width: 100%; height: auto; }
+.mermaid text, .mermaid .nodeLabel, .mermaid .edgeLabel { font-size: 22px !important; }
+.rr-error { color: #922d25; background: #fff2f0; border: 1px solid #e7aaa3; padding: 12px; white-space: pre-wrap; }
+img, svg { max-width: 100%; }
+.katex { font-size: 1.08em; }
+.katex-display { overflow: hidden; margin: 18px 0; }
+hr { border: 0; border-top: 1px solid #d5deeb; margin: 22px 0; }
+.rr-card, .rr-chart, table, pre, .mermaid, figure { break-inside: avoid; page-break-inside: avoid; }
+@page { size: 540px 900px; margin: 24px; }
+@media print {
+  html, body { width: auto; }
+  .rr-report { padding: 0; }
+  * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+}
+.rr-block { margin: 0 0 20px; }
+.rr-stats, .rr-columns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.rr-stats > *, .rr-columns > * { min-width: 0; margin-bottom: 0; }
+.rr-columns:has(.rr-chart), .rr-columns:has(table), .rr-columns:has(.mermaid), .rr-columns:has(.rr-kline) { grid-template-columns: minmax(0, 1fr); }
+.rr-stat-label, .rr-stat-description { color: #52647a; font-size: 22px; }
+.rr-stat-value { color: #102c50; font-size: 34px; line-height: 1.3; font-weight: 700; margin: 8px 0; font-variant-numeric: tabular-nums; }
+.rr-stat-change { font-weight: 700; font-size: 22px; }
+.rr-positive { color: #14754c; }
+.rr-negative { color: #b33432; }
+.rr-number { text-align: right; font-variant-numeric: tabular-nums; }
+.rr-callout { padding: 16px; border-radius: 10px; border-left: 5px solid #3e77b6; background: #eef5fd; }
+.rr-callout-warn { border-color: #ae7619; background: #fff8e8; }
+.rr-callout-good { border-color: #218160; background: #eef9f3; }
+.rr-callout-risk { border-color: #b7473c; background: #fff1ef; }
+.rr-sources { color: #52647a; }
+.rr-sources ol { padding-left: 28px; }
+.rr-timeline ol { list-style: none; border-left: 3px solid #d5e3f4; padding-left: 20px; margin-left: 8px; }
+.rr-timeline li { position: relative; margin-bottom: 22px; }
+.rr-timeline li::before { content: ""; position: absolute; width: 13px; height: 13px; border-radius: 50%; background: #3e77b6; left: -28px; top: 10px; }
+.rr-timeline-date { color: #52647a; font-size: 22px; }

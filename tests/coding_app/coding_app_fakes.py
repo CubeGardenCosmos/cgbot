@@ -148,7 +148,12 @@ def coding_config(tmp_path: Path, *, imagegen: bool = False) -> CodingConfig:
             idle_seconds=3600.0,
             container_prefix="cgbot-sbx-",
         ),
-        codex=CodexConfig(model="test-model", reasoning_effort="medium", appserver_port=8765),
+        codex=CodexConfig(
+            model="test-model",
+            reasoning_effort="medium",
+            appserver_port=8765,
+            context_window=128000,
+        ),
         concurrency=ConcurrencyConfig(
             per_user=4,
             degraded=1,

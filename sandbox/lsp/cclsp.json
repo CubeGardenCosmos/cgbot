@@ -1,0 +1,19 @@
+{
+  "servers": [
+    {
+      "extensions": ["py", "pyi"],
+      "command": ["pyright-langserver", "--stdio"],
+      "rootDir": "/workspace"
+    },
+    {
+      "extensions": ["ts", "tsx", "js", "jsx", "mjs", "cjs"],
+      "command": ["typescript-language-server", "--stdio"],
+      "rootDir": "/workspace",
+      "initializationOptions": {
+        "tsserver": {
+          "path": "/usr/local/lib/node_modules/typescript/lib/tsserver.js"
+        }
+      }
+    }
+  ]
+}

@@ -34,6 +34,7 @@ addopts = "-m 'not integration and not platform'"
 [tool.ruff]
 line-length = 100
 target-version = "py312"
+extend-exclude = ["sandbox"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "ASYNC"]

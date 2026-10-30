@@ -1,0 +1,4 @@
+# Image-wide defaults; a working-directory matplotlibrc or rcParams can override.
+font.family: sans-serif
+font.sans-serif: Noto Sans CJK SC, Noto Sans CJK TC, Noto Sans CJK JP, DejaVu Sans
+axes.unicode_minus: False
