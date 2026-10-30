@@ -12,7 +12,7 @@ from pathlib import Path
 
 from cgbot.app import App
 from cgbot.config import Config, ConfigError, load_config
-from cgbot.provider import ResponsesProvider
+from cgbot.provider import build_provider
 
 
 def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
@@ -25,12 +25,7 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
 
 
 async def _serve(config: Config) -> None:
-    provider = ResponsesProvider(
-        base_url=config.provider.base_url,
-        api_key=config.provider.api_key.reveal(),
-        model=config.provider.model,
-        context_window=config.provider.context_window,
-    )
+    provider = build_provider(config.provider)
     app = App(config, provider)
     stop = asyncio.Event()
     loop = asyncio.get_running_loop()
