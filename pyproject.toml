@@ -1,0 +1,40 @@
+[project]
+name = "cgbot"
+version = "0.1.0"
+description = "LLM-native QQ bot framework"
+requires-python = ">=3.12"
+dependencies = [
+    "websockets>=13",
+    "httpx>=0.27",
+]
+
+[dependency-groups]
+dev = ["pytest>=8", "pytest-asyncio>=0.24", "ruff>=0.6", "pyright>=1.1.380"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/cgbot"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+markers = [
+    "integration: 真实边界集成测试,默认跳过,须用户授权",
+    "platform: 平台检查",
+]
+addopts = "-m 'not integration and not platform'"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "ASYNC"]
+
+[tool.pyright]
+include = ["src", "tests"]
+pythonVersion = "3.12"
+typeCheckingMode = "standard"
