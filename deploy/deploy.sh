@@ -50,7 +50,7 @@ docker compose version >/dev/null 2>&1 && ok "docker compose available" || bad "
 for n in dsh_caged_internal dsh_caged_ctl qqbot_astrbot_network; do
   docker network inspect "$n" >/dev/null 2>&1 && ok "network $n" || bad "network $n (owned by legacy dsh project)"
 done
-if proj=$(docker inspect -f '{{index .Config.Labels "com.docker.compose.project"}}' cgbot 2>/dev/null); then
+if proj=$(docker inspect --type container -f '{{index .Config.Labels "com.docker.compose.project"}}' cgbot 2>/dev/null); then
   [ "$proj" = cgbot ] && ok "container cgbot belongs to compose project cgbot" \
     || bad "container named cgbot exists outside project cgbot; refusing to touch it"
 else
@@ -103,7 +103,7 @@ wait_healthy() {
   local deadline status
   deadline=$(( $(date +%s) + HEALTH_TIMEOUT ))
   while :; do
-    status="$(ssh_run "docker inspect -f '{{.State.Health.Status}}' cgbot 2>/dev/null || echo missing")"
+    status="$(ssh_run "docker inspect --type container -f '{{.State.Health.Status}}' cgbot 2>/dev/null || echo missing")"
     case "$status" in
       healthy) log "cgbot healthy"; return 0 ;;
       unhealthy) die "cgbot unhealthy. Inspect: ssh $HOST docker logs --tail 100 cgbot ; roll back: $0 --rollback <previous tag>" ;;
