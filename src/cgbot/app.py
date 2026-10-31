@@ -410,6 +410,9 @@ class App:
     async def handle_message(self, message: InboundMessage) -> None:
         if self._closing:
             return
+        if _is_foreign_command(message.segments):
+            log.info("slash command ignored: message_id=%s", message.message_id)
+            return
         if message.scope == "group":
             await self._handle_group(message)
             return
@@ -716,6 +719,26 @@ class App:
             event.event_id,
             outcome.status,
         )
+
+
+def _is_foreign_command(segments: Iterable[Segment]) -> bool:
+    """True for a text message starting with "/" (other bots' commands), except "/reset".
+
+    Leading at/reply segments are skipped, so "@bot /订阅 新闻" counts too.
+    """
+    for segment in segments:
+        if segment.type in ("at", "reply"):
+            continue
+        if segment.type != "text":
+            return False
+        text = str(segment.data.get("text", "")).strip()
+        if not text and segment.type == "text":
+            continue
+        if not text.startswith("/"):
+            return False
+        command = text.split(maxsplit=1)[0]
+        return command.casefold() != "/reset"
+    return False
 
 
 async def _cancel_tasks(tasks: Iterable[asyncio.Task[Any]]) -> None:
