@@ -47,7 +47,7 @@ secrets 文件权限必须为 `0600`(组和其他用户不得有任何权限),�
 | `mute_keywords` | 闭嘴关键词;默认空 |
 | `idle_timeout_seconds` | 群会话空闲结束秒数(默认 600) |
 | `max_turns` | 单次群会话最多轮数(默认 30) |
-| `skill_topics` / `skill_memes` / `skill_rules` / `skill_members` / `skill_habits_per_member` | 群 SKILL 各类条目上限 |
+| `skill_topics` / `skill_memes` / `skill_rules` / `skill_members` / `skill_habits_per_member` | 群 SKILL 各类条目上限;`skill_memes` 只限制卡内梗条目,梗不再进入群提示词(见 `meme.sqlite`) |
 
 后台每 30 秒执行一次群会话超时扫描。进程启动时群会话从存储恢复。
 
@@ -70,6 +70,7 @@ secrets 文件权限必须为 `0600`(组和其他用户不得有任何权限),�
 | `memory.sqlite` | 记忆本(私聊与群可见域) |
 | `group_state.sqlite` | 群门控状态 |
 | `group_skill.sqlite` | 群 SKILL |
+| `meme.sqlite` | 群梗词条表(按群隔离;群会话总结写入。`meme_lookup` 工具:群会话只查本群,私聊可查全部群) |
 
 数据目录不入库;删除任一文件会丢失对应数据,操作前先备份。
 

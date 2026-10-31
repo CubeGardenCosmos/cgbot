@@ -31,6 +31,7 @@ from cgbot.group.session import GroupSessionManager, GroupSessionPolicy, GroupTr
 from cgbot.group.skill import GroupSkillStore, ProfileEntry, SkillLimits
 from cgbot.group.store import GroupStateStore
 from cgbot.identity import AsyncIdentityStore
+from cgbot.meme import MemeStore, meme_lookup_tool
 from cgbot.memory import MemoryBook, memory_tools
 from cgbot.memory.domain import PRIVATE_SESSION_PREFIX, Viewer
 from cgbot.memory.store import format_entries
@@ -93,6 +94,7 @@ SYSTEM_PROMPT = """\
 # 风格
 - 真诚亲切的好友,随意自然,会吐槽日常。绝不用客服口吻("请问有什么可以帮您""我是人工智能"一律禁止)。
 - 口语化,常省略主语,不要每句机械地自称。熟悉中文互联网的热梗和黑话,接地气、会接梗。
+- 遇到可能是梗/黑话的内容时,自行调用 meme_lookup 查询,不要凭猜测。
 - 主人是 KLP(QQ 2749478757):对 KLP 更亲切活泼,可以撒娇打闹,称呼 KLP 或主人。其他人当普通好友。
 - 给足情绪价值:对方开心就跟着开心,难过就先接住情绪、认真陪着,再轻轻地出主意;
   对方做成了事要真诚夸,累了就安慰,低落时别讲大道理。回应要具体、贴着对方说的内容,
@@ -309,11 +311,13 @@ class App:
         self._image_stager = (
             ImageStager(config.coding.docker.host_data_dir) if config.coding is not None else None
         )
+        self._memes = MemeStore(storage.for_module("meme"))
         registry = builtin_tools()
         for spec in memory_tools(self._memory):
             registry.register(spec)
         for spec in search_tools(self._search, gemini_client=self._gemini):
             registry.register(spec)
+        registry.register(meme_lookup_tool(self._memes))
         if self._voice is not None:
             registry.register(self._send_voice_tool(self._voice))
         if self._coding is not None:
@@ -347,6 +351,7 @@ class App:
             skills=self._group_skills,
             sender=self._send_group,
             profiles=_MemoryProfileSink(self._memory),
+            memes=self._memes,
             limits=SkillLimits(
                 topics=group_cfg.skill_topics,
                 memes=group_cfg.skill_memes,
@@ -393,6 +398,7 @@ class App:
         await self._search.close()
         self._group_state.close()
         self._group_skills.close()
+        self._memes.close()
         self._omp_store.close()
         if self._voice is not None:
             for service in self._voice.services:

@@ -36,6 +36,7 @@ from cgbot.group.skill import (
 )
 from cgbot.group.text import plain_text
 from cgbot.group.tools import TurnControl, group_session_id, group_tools
+from cgbot.meme import MemeStore, meme_lookup_tool, parse_meme
 from cgbot.model import Channel, InboundMessage, OutboundMessage, SendResult
 from cgbot.provider import (
     ModelProvider,
@@ -63,6 +64,7 @@ _REASON_LABEL: dict[str, str] = {
 GROUP_INSTRUCTIONS = (
     "你是这个 QQ 群里的机器人。只能通过 reply 工具在本群发言,普通文本输出不会被发送。"
     "没有需要说的就不要调用 reply。想结束这段对话时调用 end_conversation。"
+    "遇到可能是梗/黑话的内容时,自行调用 meme_lookup 查询,不要凭猜测。"
     "不要提及或推断私聊内容,也不要透露你看不到的信息。"
 )
 
@@ -147,6 +149,7 @@ class GroupSessionManager:
         skills: GroupSkillStore,
         sender: Callable[[OutboundMessage], Awaitable[SendResult]],
         profiles: ProfileSink,
+        memes: MemeStore,
         limits: SkillLimits,
         policy: GroupSessionPolicy,
         chat_reasoning_effort: str | None,
@@ -158,6 +161,7 @@ class GroupSessionManager:
         self._skills = skills
         self._sender = sender
         self._profiles = profiles
+        self._memes = memes
         self._limits = limits
         self._policy = policy
         self._chat_effort = chat_reasoning_effort
@@ -317,10 +321,12 @@ class GroupSessionManager:
     ) -> _Session:
         card = await self._skills.get_card(group_id)
         control = TurnControl()
+        tools = group_tools(group_id, control)
+        tools.register(meme_lookup_tool(self._memes))
         runner = AgentRunner(
             _EndGuardProvider(self._provider, control),
             self._sessions,
-            group_tools(group_id, control),
+            tools,
             _instructions(GROUP_INSTRUCTIONS, card),
             self._sender,
             reasoning_effort=self._chat_effort,
@@ -387,6 +393,12 @@ class GroupSessionManager:
             limits=self._limits,
         )
         await self._skills.put_card(card)
+        meme_entries = [parse_meme(m) for m in summary.memes if m.strip()]
+        if meme_entries:
+            try:
+                await self._memes.upsert_many(session.group_id, meme_entries, now=now)
+            except Exception as exc:  # best-effort: the card is already stored
+                log.warning("group meme write failed: %s", type(exc).__name__)
         entries = profile_entries(
             group_id=session.group_id,
             session_id=session.session_id,

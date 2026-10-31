@@ -21,6 +21,7 @@ from cgbot.group import (
 )
 from cgbot.group.skill import SUMMARY_INSTRUCTIONS
 from cgbot.group.tools import group_reply_tool
+from cgbot.meme import MemeEntry, MemeStore
 from cgbot.model import Channel, InboundMessage, OutboundMessage, Segment, SendResult
 from cgbot.provider import (
     FunctionCall,
@@ -170,11 +171,19 @@ def skills(tmp_path: Path) -> Iterator[GroupSkillStore]:
     store.close()
 
 
+@pytest.fixture
+def memes(tmp_path: Path) -> Iterator[MemeStore]:
+    store = MemeStore(tmp_path / "meme.sqlite")
+    yield store
+    store.close()
+
+
 def make_manager(
     sessions: AsyncSessionStore,
     skills: GroupSkillStore,
     provider: FakeProvider,
     *,
+    memes: MemeStore,
     sender: RecordingSender,
     clock: Clock,
     profiles: InMemoryProfileSink | None = None,
@@ -186,6 +195,7 @@ def make_manager(
         skills=skills,
         sender=sender,
         profiles=profiles if profiles is not None else InMemoryProfileSink(),
+        memes=memes,
         limits=LIMITS,
         policy=policy or GroupSessionPolicy(),
         chat_reasoning_effort="low",
@@ -292,7 +302,7 @@ def test_group_tools_have_no_channel_or_target_parameter() -> None:
 
 
 async def test_end_tool_ends_session_with_summary_and_stops_turn(
-    sessions: AsyncSessionStore, skills: GroupSkillStore
+    sessions: AsyncSessionStore, skills: GroupSkillStore, memes: MemeStore
 ) -> None:
     members = [
         {"user_id": "u1", "role": "成员", "habits": ["爱吐槽"]},
@@ -309,7 +319,9 @@ async def test_end_tool_ends_session_with_summary_and_stops_turn(
     )
     sender = RecordingSender()
     profiles = InMemoryProfileSink()
-    mgr = make_manager(sessions, skills, provider, sender=sender, clock=Clock(), profiles=profiles)
+    mgr = make_manager(
+        sessions, skills, provider, memes=memes, sender=sender, clock=Clock(), profiles=profiles
+    )
 
     result = await mgr.handle(gmsg("m1", "u1", "大肥鱼 再见"), "wake")
 
@@ -334,14 +346,14 @@ async def test_end_tool_ends_session_with_summary_and_stops_turn(
 
 
 async def test_next_session_receives_card_in_instructions(
-    sessions: AsyncSessionStore, skills: GroupSkillStore
+    sessions: AsyncSessionStore, skills: GroupSkillStore, memes: MemeStore
 ) -> None:
     provider = FakeProvider(
         chat=[calls_resp(("c1", "end_conversation", {})), text_resp("ok")],
         summary=summary_json("冷清但友好", [{"user_id": "u1", "role": None, "habits": ["夜猫"]}]),
     )
     sender = RecordingSender()
-    mgr = make_manager(sessions, skills, provider, sender=sender, clock=Clock())
+    mgr = make_manager(sessions, skills, provider, memes=memes, sender=sender, clock=Clock())
     await mgr.handle(gmsg("m1", "u1", "大肥鱼 在吗"), "wake")
 
     await mgr.handle(gmsg("m2", "u2", "大肥鱼 新一轮"), "wake")
@@ -353,12 +365,14 @@ async def test_next_session_receives_card_in_instructions(
 
 
 async def test_next_session_does_not_replay_previous_raw_turns(
-    sessions: AsyncSessionStore, skills: GroupSkillStore
+    sessions: AsyncSessionStore, skills: GroupSkillStore, memes: MemeStore
 ) -> None:
     provider = FakeProvider(
         chat=[calls_resp(("c1", "end_conversation", {})), text_resp("ok")],
     )
-    mgr = make_manager(sessions, skills, provider, sender=RecordingSender(), clock=Clock())
+    mgr = make_manager(
+        sessions, skills, provider, memes=memes, sender=RecordingSender(), clock=Clock()
+    )
     await mgr.handle(gmsg("m1", "u1", "旧消息内容XYZ"), "wake")
 
     await mgr.handle(gmsg("m2", "u2", "新消息"), "wake")
@@ -369,7 +383,7 @@ async def test_next_session_does_not_replay_previous_raw_turns(
 
 
 async def test_idle_sweep_ends_only_after_timeout(
-    sessions: AsyncSessionStore, skills: GroupSkillStore
+    sessions: AsyncSessionStore, skills: GroupSkillStore, memes: MemeStore
 ) -> None:
     clock = Clock()
     provider = FakeProvider(chat=[text_resp("ok")])
@@ -377,6 +391,7 @@ async def test_idle_sweep_ends_only_after_timeout(
         sessions,
         skills,
         provider,
+        memes=memes,
         sender=RecordingSender(),
         clock=clock,
         policy=GroupSessionPolicy(idle_timeout_s=600, max_turns=30),
@@ -398,13 +413,14 @@ async def test_idle_sweep_ends_only_after_timeout(
 
 
 async def test_turn_limit_ends_session_after_max_turns(
-    sessions: AsyncSessionStore, skills: GroupSkillStore
+    sessions: AsyncSessionStore, skills: GroupSkillStore, memes: MemeStore
 ) -> None:
     provider = FakeProvider(chat=[text_resp("a"), text_resp("b")])
     mgr = make_manager(
         sessions,
         skills,
         provider,
+        memes=memes,
         sender=RecordingSender(),
         clock=Clock(),
         policy=GroupSessionPolicy(idle_timeout_s=600, max_turns=2),
@@ -420,12 +436,12 @@ async def test_turn_limit_ends_session_after_max_turns(
 
 
 async def test_mute_during_running_turn_cancels_without_summary(
-    sessions: AsyncSessionStore, skills: GroupSkillStore
+    sessions: AsyncSessionStore, skills: GroupSkillStore, memes: MemeStore
 ) -> None:
     provider = FakeProvider(chat=[text_resp("never")])
     provider.block = asyncio.Event()
     sender = RecordingSender()
-    mgr = make_manager(sessions, skills, provider, sender=sender, clock=Clock())
+    mgr = make_manager(sessions, skills, provider, memes=memes, sender=sender, clock=Clock())
 
     task = asyncio.create_task(mgr.handle(gmsg("m1", "u1", "大肥鱼 闭嘴"), "wake"))
     await provider.started.wait()
@@ -446,10 +462,12 @@ async def test_mute_during_running_turn_cancels_without_summary(
 
 
 async def test_mute_without_running_turn_ends_session_without_summary(
-    sessions: AsyncSessionStore, skills: GroupSkillStore
+    sessions: AsyncSessionStore, skills: GroupSkillStore, memes: MemeStore
 ) -> None:
     provider = FakeProvider(chat=[text_resp("ok")])
-    mgr = make_manager(sessions, skills, provider, sender=RecordingSender(), clock=Clock())
+    mgr = make_manager(
+        sessions, skills, provider, memes=memes, sender=RecordingSender(), clock=Clock()
+    )
     await mgr.handle(gmsg("m1", "u1", "大肥鱼 hi"), "wake")
 
     await mgr.mute(GID)
@@ -466,12 +484,19 @@ async def test_mute_without_running_turn_ends_session_without_summary(
 async def test_summary_failure_closes_session_and_writes_no_card(
     sessions: AsyncSessionStore,
     skills: GroupSkillStore,
+    memes: MemeStore,
     summary: str | Exception,
 ) -> None:
     provider = FakeProvider(chat=[calls_resp(("c1", "end_conversation", {}))], summary=summary)
     profiles = InMemoryProfileSink()
     mgr = make_manager(
-        sessions, skills, provider, sender=RecordingSender(), clock=Clock(), profiles=profiles
+        sessions,
+        skills,
+        provider,
+        memes=memes,
+        sender=RecordingSender(),
+        clock=Clock(),
+        profiles=profiles,
     )
 
     await mgr.handle(gmsg("m1", "u1", "大肥鱼 结束"), "wake")
@@ -486,13 +511,15 @@ async def test_summary_failure_closes_session_and_writes_no_card(
 
 
 async def test_group_history_never_appears_under_private_session(
-    sessions: AsyncSessionStore, skills: GroupSkillStore
+    sessions: AsyncSessionStore, skills: GroupSkillStore, memes: MemeStore
 ) -> None:
     provider = FakeProvider(
         chat=[calls_resp(("c1", "reply", {"text": "群里说"}), ("c2", "end_conversation", {}))],
         summary=summary_json(),
     )
-    mgr = make_manager(sessions, skills, provider, sender=RecordingSender(), clock=Clock())
+    mgr = make_manager(
+        sessions, skills, provider, memes=memes, sender=RecordingSender(), clock=Clock()
+    )
     await mgr.handle(gmsg("m1", "u1", "群消息 秘密"), "wake")
 
     assert await sessions.load("private:u1") == []
@@ -503,10 +530,12 @@ async def test_group_history_never_appears_under_private_session(
 
 
 async def test_proactive_turn_uses_buffered_context_and_persists_participants(
-    sessions: AsyncSessionStore, skills: GroupSkillStore
+    sessions: AsyncSessionStore, skills: GroupSkillStore, memes: MemeStore
 ) -> None:
     provider = FakeProvider(chat=[text_resp("no reply")])
-    mgr = make_manager(sessions, skills, provider, sender=RecordingSender(), clock=Clock())
+    mgr = make_manager(
+        sessions, skills, provider, memes=memes, sender=RecordingSender(), clock=Clock()
+    )
     buffered = (BufferedMessage("b1", "u2", T0, "今天吃啥"),)
 
     await mgr.handle(gmsg("m9", "u9", "无关"), "proactive", buffered=buffered)
@@ -521,20 +550,23 @@ async def test_proactive_turn_uses_buffered_context_and_persists_participants(
 
 
 async def test_restore_resumes_active_session_and_keeps_history(
-    sessions: AsyncSessionStore, skills: GroupSkillStore
+    sessions: AsyncSessionStore, skills: GroupSkillStore, memes: MemeStore
 ) -> None:
     clock = Clock()
     first = make_manager(
         sessions,
         skills,
         FakeProvider(chat=[text_resp("a")]),
+        memes=memes,
         sender=RecordingSender(),
         clock=clock,
     )
     await first.handle(gmsg("m1", "u1", "持久化之前的话"), "wake")
 
     provider = FakeProvider(chat=[text_resp("b")])
-    second = make_manager(sessions, skills, provider, sender=RecordingSender(), clock=clock)
+    second = make_manager(
+        sessions, skills, provider, memes=memes, sender=RecordingSender(), clock=clock
+    )
     await second.restore()
     assert second.is_active(GID)
 
@@ -547,13 +579,13 @@ async def test_restore_resumes_active_session_and_keeps_history(
 
 
 async def test_reply_from_group_turn_is_stored_as_tool_call_in_group_session(
-    sessions: AsyncSessionStore, skills: GroupSkillStore
+    sessions: AsyncSessionStore, skills: GroupSkillStore, memes: MemeStore
 ) -> None:
     provider = FakeProvider(
         chat=[calls_resp(("c1", "reply", {"text": "好的"})), text_resp("done")],
     )
     sender = RecordingSender()
-    mgr = make_manager(sessions, skills, provider, sender=sender, clock=Clock())
+    mgr = make_manager(sessions, skills, provider, memes=memes, sender=sender, clock=Clock())
 
     await mgr.handle(gmsg("m1", "u1", "大肥鱼 问个事"), "wake")
 
@@ -561,3 +593,29 @@ async def test_reply_from_group_turn_is_stored_as_tool_call_in_group_session(
     items = await sessions.load(SID)
     assert any(i.kind == "tool_call" and i.payload.get("name") == "reply" for i in items)
     assert mgr.is_active(GID)
+
+
+async def test_group_session_exposes_meme_lookup_and_stores_summary_memes(
+    sessions: AsyncSessionStore, skills: GroupSkillStore, memes: MemeStore
+) -> None:
+    summary = json.dumps(
+        {
+            "atmosphere": "轻松",
+            "topics": [],
+            "memes": ["大肥鱼: 群吉祥物", "躺平"],
+            "rules": [],
+            "members": [],
+        },
+        ensure_ascii=False,
+    )
+    provider = FakeProvider(chat=[calls_resp(("c1", "end_conversation", {}))], summary=summary)
+    mgr = make_manager(
+        sessions, skills, provider, memes=memes, sender=RecordingSender(), clock=Clock()
+    )
+
+    await mgr.handle(gmsg("m1", "u1", "大肥鱼 结束"), "wake")
+
+    names = {tool["name"] for tool in provider.chat_requests[0].tools}
+    assert "meme_lookup" in names
+    assert await memes.lookup("大肥鱼", group_id=GID) == (MemeEntry("大肥鱼", "群吉祥物"),)
+    assert await memes.lookup("躺平", group_id=GID) == (MemeEntry("躺平", ""),)

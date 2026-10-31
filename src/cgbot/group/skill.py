@@ -197,8 +197,6 @@ def render_card_text(card: SkillCard) -> str:
     lines = [f"群气氛: {card.atmosphere or '(未记录)'}"]
     if card.topics:
         lines.append("常聊话题: " + "; ".join(card.topics))
-    if card.memes:
-        lines.append("群内梗: " + "; ".join(card.memes))
     if card.rules:
         lines.append("群内约定: " + "; ".join(card.rules))
     if card.members:
