@@ -179,6 +179,18 @@ class IdentityStore:
                 user_id = str(row[0])
             return self._load(conn, user_id)
 
+    def find(self, channel: Channel) -> Identity | None:
+        """The identity bound to ``channel``, or None. Never creates an identity or binding."""
+        _check_channel(channel)
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT user_id FROM identity_channels WHERE kind = ? AND account = ?",
+                (channel.kind, channel.account),
+            ).fetchone()
+            if row is None:
+                return None
+            return self._load(self._conn, str(row[0]))
+
     def _new_user(self, conn: sqlite3.Connection) -> str:
         # Called only inside BEGIN IMMEDIATE, so MAX+1 is race-free. Identities are
         # never deleted, so the sequence has no gaps that matter.
@@ -271,6 +283,9 @@ class AsyncIdentityStore:
 
     async def resolve(self, channel: Channel) -> Identity:
         return await asyncio.to_thread(self._store.resolve, channel)
+
+    async def find(self, channel: Channel) -> Identity | None:
+        return await asyncio.to_thread(self._store.find, channel)
 
     async def identity_for_user(self, user_id: str) -> Identity | None:
         return await asyncio.to_thread(self._store.identity_for_user, user_id)

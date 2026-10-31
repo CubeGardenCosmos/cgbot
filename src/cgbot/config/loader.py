@@ -115,8 +115,9 @@ def _scope(t: _Table) -> ScopeConfig:
     owner = t.optional_qq("owner")
     friends = t.qq_ids("friends")
     groups = t.qq_ids("groups")
+    all_friends = t.bool_or("all_friends", False)
     t.close()
-    return ScopeConfig(owner=owner, friends=friends, groups=groups)
+    return ScopeConfig(owner=owner, friends=friends, groups=groups, all_friends=all_friends)
 
 
 def _provider(t: _Table, source: _SecretSource) -> ProviderConfig:

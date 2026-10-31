@@ -82,6 +82,12 @@ def test_valid_load_applies_defaults_and_reads_values(tmp_path: Path, secrets_fi
     assert cfg.logging.level == "INFO"
 
 
+def test_all_friends_defaults_off_and_parses_true(tmp_path: Path, secrets_file: Path) -> None:
+    assert load_with(tmp_path, BASE_TOML, secrets_file).scope.all_friends is False
+    toml = edit(BASE_TOML, "groups = [2001]", "groups = [2001]\nall_friends = true")
+    assert load_with(tmp_path, toml, secrets_file).scope.all_friends is True
+
+
 def test_full_example_file_loads(tmp_path: Path) -> None:
     example = REPO_ROOT / "config.example.toml"
     secrets = write(tmp_path, "s.toml", '[secrets]\nprovider_api_key = "x-example"\n')
@@ -194,6 +200,8 @@ def test_missing_provider_section_is_named(tmp_path: Path, secrets_file: Path) -
         ('friends = [1001, "1002"]', "friends = [0]", "scope.friends[0]"),
         ('friends = [1001, "1002"]', 'friends = "1001"', "scope.friends"),
         ("groups = [2001]", "groups = [-5]", "scope.groups[0]"),
+        ("groups = [2001]", "groups = [2001]\nall_friends = 1", "scope.all_friends"),
+        ("groups = [2001]", 'groups = [2001]\nall_friends = "true"', "scope.all_friends"),
         ('base_url = "https://up.example/v1"', 'base_url = "ftp://x"', "provider.base_url"),
         ('model = "model-x"', 'model = ""', "provider.model"),
         ("context_window = 128000", "context_window = 0", "provider.context_window"),

@@ -33,7 +33,7 @@ secrets 文件权限必须为 `0600`(组和其他用户不得有任何权限),�
 
 ## 4. 服务范围
 
-- `[scope] friends`:私聊白名单(QQ 号)。`groups`:群白名单,群内任何成员均在范围内。
+- `[scope] friends`:私聊白名单(QQ 号)。`all_friends = true`(默认 false)时,所有真实 QQ 好友也进入私聊范围(以 NapCat 私聊事件 `sub_type == "friend"` 判定,临时会话不算)。`groups`:群白名单,群内任何成员均在范围内,不受 `all_friends` 影响。
 - 范围外消息在进入身份、会话与 LLM 之前丢弃。省略整节即全部拒绝。
 - 群聊仅在 `groups` 内生效;群内容不进入任何私聊会话。
 

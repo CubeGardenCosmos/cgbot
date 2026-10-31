@@ -33,6 +33,9 @@ class InboundMessage:
     segments: tuple[Segment, ...]
     time: float  # unix seconds
     reply_to: str | None = None  # quoted message_id
+    # Private only: NapCat sub_type == "friend" (a real friend, not a group temp session).
+    # False for group messages and whenever the platform does not say so (fail closed).
+    is_friend: bool = False
 
 
 @dataclass(frozen=True, slots=True)

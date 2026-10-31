@@ -59,15 +59,21 @@ class ScopeConfig:
     owner: str | None
     friends: frozenset[str]
     groups: frozenset[str]
+    all_friends: bool = False  # True: every real QQ friend (NapCat sub_type "friend") is in scope
 
-    def allows(self, scope: Scope, user_id: str, group_id: str | None) -> bool:
-        """Private: sender must be a configured friend. Group: group must be configured.
+    def allows(
+        self, scope: Scope, user_id: str, group_id: str | None, *, is_friend: bool = False
+    ) -> bool:
+        """Private: sender must be in ``friends``, or a real friend when ``all_friends`` is on.
 
-        Group membership is not friend-gated: any member of a configured group is in scope.
-        ``owner`` is an identity marker only and does not extend the allowlist.
+        ``is_friend`` is the platform fact that the private sender is a real friend (NapCat
+        ``sub_type == "friend"``); temporary sessions opened from group members are not friends.
+        Group: group must be configured. Group membership is not friend-gated: any member of a
+        configured group is in scope. ``owner`` is an identity marker only and does not extend
+        the allowlist.
         """
         if scope == "private":
-            return user_id in self.friends
+            return user_id in self.friends or (self.all_friends and is_friend)
         if scope == "group":
             return group_id is not None and group_id in self.groups
         raise ValueError(f"unknown scope: {scope!r}")

@@ -398,7 +398,9 @@ class App:
         if message.scope == "group":
             await self._handle_group(message)
             return
-        if not self._config.scope.allows("private", message.user_id, None):
+        if not self._config.scope.allows(
+            "private", message.user_id, None, is_friend=message.is_friend
+        ):
             log.info("private message out of scope dropped: message_id=%s", message.message_id)
             return
         text = await self._render_private(message.segments)
@@ -425,9 +427,13 @@ class App:
     async def handle_input_status(self, status: InputStatus) -> None:
         if self._closing:
             return
-        if not self._config.scope.allows("private", status.user_id, None):
+        channel = Channel("qq", status.user_id)
+        # input_status carries no sub_type. With all_friends, a user counts as a friend only when
+        # an identity already exists (created by an accepted private message; find never creates).
+        known = self._config.scope.all_friends and (await self._identity.find(channel)) is not None
+        if not self._config.scope.allows("private", status.user_id, None, is_friend=known):
             return
-        identity = await self._identity.resolve(Channel("qq", status.user_id))
+        identity = await self._identity.resolve(channel)
         session_id = await self._identity.private_session_id(identity.user_id)
         self._dispatcher.on_typing(session_id)
 

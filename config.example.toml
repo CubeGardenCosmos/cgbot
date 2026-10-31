@@ -18,7 +18,8 @@ path = "/ws"         # 默认 /ws
 
 [scope]
 # 服务范围白名单。范围外的私聊/群消息在进入业务与 LLM 之前丢弃。
-# 私聊:发送者须在 friends;群聊:群号须在 groups(群内任何成员均在范围内)。
+# 私聊:发送者须在 friends;若 all_friends = true,则所有真实好友(NapCat 判定为好友会话)也在范围内。群聊:群号须在 groups(群内任何成员均在范围内)。
+all_friends = false # 可选,默认 false。true:所有真实 QQ 好友进入范围(临时会话不算好友);friends 仍可单独列出。群聊不受此项影响。
 # 省略整节 = 全部拒绝。
 friends = []         # 好友 QQ 号,纯数字,例:[10000000001, 10000000002]
 groups = []          # 固定群号,纯数字

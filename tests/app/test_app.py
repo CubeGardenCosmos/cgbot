@@ -10,6 +10,7 @@ import asyncio
 import json
 import sqlite3
 from collections.abc import AsyncIterator
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
@@ -82,7 +83,12 @@ def make_config(tmp_path: Path) -> Config:
 
 
 def private_msg(
-    message_id: str, user_id: str, text: str, reply_to: str | None = None
+    message_id: str,
+    user_id: str,
+    text: str,
+    reply_to: str | None = None,
+    *,
+    is_friend: bool = False,
 ) -> InboundMessage:
     return InboundMessage(
         message_id=message_id,
@@ -92,6 +98,7 @@ def private_msg(
         segments=(Segment("text", {"text": text}),),
         time=1_700_000_000.0,
         reply_to=reply_to,
+        is_friend=is_friend,
     )
 
 
@@ -343,6 +350,46 @@ async def test_input_status_from_out_of_scope_user_is_ignored(tmp_path: Path) ->
         conn.close()
     assert count is not None
     assert count[0] == 0
+    await app.stop()
+
+
+async def test_all_friends_admits_real_friend_and_drops_temporary_session(tmp_path: Path) -> None:
+    clock = FakeTimebase()
+    provider = ScriptedProvider(*reply_script("好"))
+    config = make_config_extra(tmp_path, "")
+    config = replace(config, scope=replace(config.scope, all_friends=True))
+    app = App(config, provider, timebase=clock)
+    recorder = Recorder()
+    install(app, recorder)
+
+    await app.handle_message(private_msg("m1", "3003", "嗨", is_friend=True))
+    await settle(app, clock)
+    assert len(provider.requests) == 2
+
+    await app.handle_message(private_msg("m2", "4004", "嗨", is_friend=False))
+    await settle(app, clock)
+    assert len(provider.requests) == 2
+    assert await app._identity.find(_qq("4004")) is None  # noqa: SLF001
+    await app.stop()
+
+
+async def test_all_friends_typing_only_for_known_identity(tmp_path: Path) -> None:
+    clock = FakeTimebase()
+    provider = ScriptedProvider(*reply_script("好"))
+    config = make_config_extra(tmp_path, "")
+    config = replace(config, scope=replace(config.scope, all_friends=True))
+    app = App(config, provider, timebase=clock)
+    install(app, Recorder())
+
+    await app.handle_input_status(typing("3003"))
+    assert app._dispatcher._lanes == {}  # noqa: SLF001
+    assert await app._identity.find(_qq("3003")) is None  # noqa: SLF001
+
+    await app.handle_message(private_msg("m1", "3003", "嗨", is_friend=True))  # quiet until t=5
+    clock.advance(4)
+    await app.handle_input_status(typing("3003"))  # known identity: quiet window re-armed
+    assert app._dispatcher._lanes != {}  # noqa: SLF001
+    await settle(app, clock)
     await app.stop()
 
 

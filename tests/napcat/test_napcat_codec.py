@@ -105,6 +105,40 @@ def test_reply_to_none_without_reply_segment() -> None:
     assert msg.reply_to is None
 
 
+@pytest.mark.parametrize(
+    ("overrides", "expected"),
+    [
+        ({"sub_type": "friend"}, True),  # real friend
+        ({"sub_type": "group"}, False),  # temporary session opened from a group member
+        ({"sub_type": "other"}, False),
+        ({"sub_type": None}, False),  # sub_type absent: fail closed
+    ],
+)
+def test_private_is_friend_follows_sub_type(overrides: dict[str, object], expected: bool) -> None:
+    raw = private_event([{"type": "text", "data": {"text": "hi"}}])
+    for key, value in overrides.items():
+        if value is None:
+            raw.pop(key)
+        else:
+            raw[key] = value
+    msg = parse_event(raw)
+    assert isinstance(msg, InboundMessage)
+    assert msg.is_friend is expected
+
+
+def test_group_message_is_never_friend() -> None:
+    msg = parse_event(
+        private_event(
+            [{"type": "text", "data": {"text": "hi"}}],
+            message_type="group",
+            sub_type="friend",
+            group_id=30003,
+        )
+    )
+    assert isinstance(msg, InboundMessage)
+    assert msg.is_friend is False
+
+
 def test_group_message_parsed_with_group_scope() -> None:
     raw = private_event(
         [{"type": "text", "data": {"text": "hi"}}],

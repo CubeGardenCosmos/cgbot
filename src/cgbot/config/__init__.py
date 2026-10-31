@@ -4,8 +4,9 @@ File format (see ``config.example.toml`` at the repo root for a commented copy):
 
 - ``[napcat]``: ``host`` (default 127.0.0.1), ``port`` (required), ``path`` (default ``/ws``),
   ``token_ref`` (optional secret name; omitted means no token check).
-- ``[scope]``: ``friends`` and ``groups`` (QQ ids, default empty = deny all), ``owner``
-  (optional identity marker, does not extend the allowlist).
+- ``[scope]``: ``friends`` and ``groups`` (QQ ids, default empty = deny all), ``all_friends``
+  (bool, default false: true also admits every real QQ friend in private chat; temporary
+  sessions do not count), ``owner`` (optional identity marker, does not extend the allowlist).
 - ``[provider]``: ``base_url`` (http/https), ``model``, ``context_window`` (positive int, required),
   ``api_key_ref`` (required secret name);
   ``[provider.reasoning]`` tiers ``summary`` (low), ``private`` (high), ``planning`` (max),

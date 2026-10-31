@@ -44,6 +44,13 @@ def test_resolve_is_idempotent_for_same_qq(store: IdentityStore) -> None:
     assert store.private_session_id(first.user_id) == store.private_session_id(second.user_id)
 
 
+def test_find_is_read_only_and_matches_resolve(store: IdentityStore) -> None:
+    assert store.find(QQ_A) is None
+    assert store.find(QQ_A) is None  # lookup must not create an identity
+    resolved = store.resolve(QQ_A)
+    assert store.find(QQ_A) == resolved
+
+
 def test_two_qq_accounts_get_different_identities(store: IdentityStore) -> None:
     a = store.resolve(QQ_A)
     b = store.resolve(QQ_B)

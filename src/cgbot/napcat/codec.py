@@ -54,8 +54,10 @@ def _parse_message(raw: Mapping[str, object], self_id: str) -> InboundMessage | 
     message_type = raw.get("message_type")
     scope: Literal["private", "group"]
     group_id: str | None
+    is_friend = False
     if message_type == "private":
         scope, group_id = "private", None
+        is_friend = raw.get("sub_type") == "friend"  # temp sessions from group members: "group"
     elif message_type == "group" and raw.get("group_id") is not None:
         scope, group_id = "group", str(raw["group_id"])
     else:
@@ -76,6 +78,7 @@ def _parse_message(raw: Mapping[str, object], self_id: str) -> InboundMessage | 
         segments=segments,
         time=_event_time(raw),
         reply_to=reply_to,
+        is_friend=is_friend,
     )
 
 
