@@ -54,6 +54,24 @@ async def test_with_coding_section_app_registers_codex_tools_and_prompt(tmp_path
         await app.stop()
 
 
+async def test_private_memory_block_is_frozen_until_compaction(tmp_path: Path) -> None:
+    app = _app(tmp_path, coding=False)
+    try:
+        sid = "private:1001"
+        first = await app._private_instructions(sid)
+        await app._memory.add(
+            subject_user="1001", domain="private", source_domain="private", text="喜欢猫"
+        )
+        # Memory written mid-session must not rewrite the instructions prefix (cache stability).
+        assert await app._private_instructions(sid) == first
+        app._memory_blocks.pop(sid)  # what a successful compaction does
+        refreshed = await app._private_instructions(sid)
+        assert refreshed != first
+        assert "喜欢猫" in refreshed
+    finally:
+        await app.stop()
+
+
 async def test_stop_without_start_is_clean_with_coding_section(tmp_path: Path) -> None:
     app = _app(tmp_path, coding=True)
     await app.stop()

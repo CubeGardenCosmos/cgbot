@@ -251,6 +251,9 @@ class App:
             handler_timeout=SCHEDULER_HANDLER_TIMEOUT,
         )
         self._memory = MemoryBook(storage.for_module("memory"))
+        self._memory_blocks: dict[
+            str, str
+        ] = {}  # per-session memory prompt snapshot (cache-stable)
         self._search = SearchService(config.search)
         self._gemini: GeminiSearchClient | None = None
         gemini = config.search.gemini
@@ -649,15 +652,23 @@ class App:
         return self._runner.is_running(session_id)
 
     async def _private_instructions(self, session_id: str) -> str:
-        """Per-turn instructions: the system prompt plus what is remembered about this user."""
-        user_id = session_id.removeprefix(PRIVATE_SESSION_PREFIX)
-        entries = await self._memory.list_for_prompt(
-            viewer=Viewer.private(user_id), budget_chars=MEMORY_PROMPT_CHARS
-        )
+        """System prompt plus a per-session snapshot of what is remembered about this user.
+
+        The memory block is read once per session window and kept byte-identical until the window
+        is compacted (or the process restarts), so memories saved mid-session never rewrite the
+        instructions prefix and the provider's prompt cache stays valid. A memory saved during the
+        window is already in history as its tool call and is searchable via the memory tools.
+        """
         prompt = SYSTEM_PROMPT if self._coding is None else f"{SYSTEM_PROMPT}\n\n{CODING_PROMPT}"
-        if not entries:
-            return prompt
-        return f"{prompt}\n\n{MEMORY_HEADER}\n{format_entries(entries)}"
+        block = self._memory_blocks.get(session_id)
+        if block is None:
+            user_id = session_id.removeprefix(PRIVATE_SESSION_PREFIX)
+            entries = await self._memory.list_for_prompt(
+                viewer=Viewer.private(user_id), budget_chars=MEMORY_PROMPT_CHARS
+            )
+            block = f"\n\n{MEMORY_HEADER}\n{format_entries(entries)}" if entries else ""
+            self._memory_blocks[session_id] = block
+        return prompt + block
 
     def _on_response(self, session_id: str, usage: Usage, through_seq: int) -> None:
         self._compactor.record_usage(session_id, usage, through_seq)
@@ -669,7 +680,9 @@ class App:
 
     async def _compact_after_turn(self, session_id: str) -> None:
         try:
-            await self._compactor.maybe_compact(session_id)
+            outcome = await self._compactor.maybe_compact(session_id)
+            if outcome.status == "compacted":
+                self._memory_blocks.pop(session_id, None)
         except Exception:
             log.exception("compaction after turn failed: session_id=%s", session_id)
 
@@ -696,6 +709,8 @@ class App:
 
     async def _run_idle_compaction(self, event: SystemEvent) -> None:
         outcome = await self._compactor.handle_idle_event(event)
+        if outcome.status == "compacted":
+            self._memory_blocks.pop(str(event.payload["session_id"]), None)
         log.info(
             "compaction idle event handled: event_id=%s status=%s",
             event.event_id,
