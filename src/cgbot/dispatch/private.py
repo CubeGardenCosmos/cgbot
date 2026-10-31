@@ -38,12 +38,14 @@ QUIET_SECONDS = 5.0
 class PrivateMessage:
     """One inbound private message, already resolved to its session.
 
-    ``item`` is the Responses input item for the message text (``user_message``)."""
+    ``item`` is the Responses input item for the message text (``user_message``). ``None`` starts
+    a turn that adds no input item: its input is already stored (a Coding Agent notice record).
+    """
 
     session_id: str
     user_id: str
     message_id: str | None  # None for background wakes
-    item: dict[str, Any]
+    item: dict[str, Any] | None  # None: a turn over stored history only (a notice record)
     channel: Channel
     channels: tuple[Channel, ...]
 
@@ -93,6 +95,7 @@ class PrivateDispatcher:
             if (
                 not lane.pending
                 and self._runner.tool_called(sid)
+                and message.item is not None
                 and self._runner.inject(sid, [message.item], message_id=message.message_id)
             ):
                 log.info("message injected into running turn: session=%s", sid)
@@ -104,18 +107,20 @@ class PrivateDispatcher:
             return
         lane.pending.append(message)
 
-    def on_wake(self, message: PrivateMessage) -> None:
+    def on_wake(self, message: PrivateMessage) -> bool:
         """System-originated input (background wake). Never interrupts or injects.
 
         The wake joins the lane queue. A running turn is left alone: the wake runs after that turn
-        and the quiet window.
+        and the quiet window. ``item=None`` queues a turn over stored history only (a notice
+        record is already the input). Returns False when dropped during shutdown.
         """
         if self._closing:
             log.info("private wake dropped during shutdown: session=%s", message.session_id)
-            return
+            return False
         lane = self._lane_for(message.session_id)
         lane.pending.append(message)
         lane.last_event = self._time.now()
+        return True
 
     def _lane_for(self, sid: str) -> _Lane:
         lane = self._lanes.get(sid)
@@ -156,15 +161,16 @@ class PrivateDispatcher:
 
     async def _run(self, lane: _Lane, batch: list[PrivateMessage]) -> None:
         last = batch[-1]
+        items = [m.item for m in batch if m.item is not None]
         ctx = TurnContext(
             user_id=last.user_id,
             session_id=lane.session_id,
             source_channel=last.channel,
             source_message_id=last.message_id,
-            new_items=[m.item for m in batch],
-            reason="user",
+            new_items=items,
+            reason="user" if items else "system_event",
             channels=last.channels,
-            new_message_ids=tuple(m.message_id for m in batch),
+            new_message_ids=tuple(m.message_id for m in batch if m.item is not None),
         )
         try:
             result = await self._runner.run_turn(ctx)

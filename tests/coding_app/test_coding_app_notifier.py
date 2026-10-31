@@ -1,4 +1,4 @@
-"""QqNotifier: rendering, delivery failure isolation, history record without body text."""
+"""QqNotifier: attachments direct, notice recorded and turn triggered, text fallback."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from typing import cast
 import pytest
 
 from cgbot.coding.contracts import CodingNotice, NoticeKind, ReportStatus, StoredFile
-from cgbot.coding.notifier import SESSION_EVENT, TEXT_LIMIT, QqNotifier, render_notice
+from cgbot.coding.notifier import SESSION_EVENT, QqNotifier, fallback_text
 from cgbot.model import OutboundMessage, SendResult
 from cgbot.session import AsyncSessionStore
 
@@ -51,6 +51,17 @@ class RecordingSender:
         return self.result
 
 
+class RecordingTrigger:
+    def __init__(self, error: Exception | None = None) -> None:
+        self.error = error
+        self.calls: list[tuple[str, str]] = []
+
+    async def __call__(self, user_id: str, session_id: str) -> None:
+        self.calls.append((user_id, session_id))
+        if self.error is not None:
+            raise self.error
+
+
 @pytest.fixture
 async def store(tmp_path: Path):
     s = AsyncSessionStore(tmp_path / "sessions.sqlite", spill_dir=tmp_path / "spill")
@@ -58,84 +69,63 @@ async def store(tmp_path: Path):
     await s.close()
 
 
+def _text_of(message: OutboundMessage) -> str:
+    return str(message.segments[0].data["text"])
+
+
 @pytest.mark.parametrize(
     ("kind", "header"),
     [
-        ("report", "进度汇报：论文"),
-        ("turn_completed", "任务完成：论文"),
-        ("turn_failed", "任务失败：论文"),
-        ("turn_interrupted", "任务已停止：论文"),
-        ("queue_started", "排队指令开始：论文"),
-        ("queue_dropped", "排队已清空：论文"),
+        ("report", "进度汇报"),
+        ("turn_completed", "任务完成"),
+        ("turn_failed", "任务失败"),
+        ("turn_interrupted", "任务已停止"),
+        ("queue_started", "排队指令开始"),
+        ("queue_dropped", "排队已清空"),
     ],
 )
-def test_header_names_each_notice_kind(kind: NoticeKind, header: str) -> None:
-    segments = render_notice(_notice(kind=kind))
-    assert segments[0].type == "text"
-    assert str(segments[0].data["text"]).startswith(f"[Coding Agent] {header}")
+def test_fallback_header_names_each_notice_kind(kind: NoticeKind, header: str) -> None:
+    assert fallback_text(_notice(kind=kind)).startswith(f"[Coding Agent] {header}")
 
 
-def test_title_falls_back_to_thread_id_then_generic_label() -> None:
-    by_thread = render_notice(_notice(title=None, thread_id="t9"))
-    assert "：t9" in str(by_thread[0].data["text"])
-    generic = render_notice(_notice(title=None, thread_id=None))
-    assert "：Coding Agent" in str(generic[0].data["text"])
+def test_fallback_title_falls_back_to_thread_id_then_generic_label() -> None:
+    assert "：t9" in fallback_text(_notice(title=None, thread_id="t9"))
+    assert "：Coding Agent" in fallback_text(_notice(title=None, thread_id=None))
 
 
 @pytest.mark.parametrize(
     ("status", "label"),
     [
-        ("running", "状态：运行中"),
-        ("waiting_user_input", "状态：等待你的输入"),
-        ("completed", "状态：已完成"),
-        ("failed", "状态：失败"),
+        ("running", "运行中"),
+        ("waiting_user_input", "等待你的输入"),
+        ("completed", "已完成"),
+        ("failed", "失败"),
     ],
 )
-def test_status_line_is_localized(status: ReportStatus, label: str) -> None:
-    text = str(render_notice(_notice(status=status))[0].data["text"])
-    assert label in text
+def test_fallback_status_line_is_localized(status: ReportStatus, label: str) -> None:
+    assert f"状态：{label}" in fallback_text(_notice(status=status))
 
 
-def test_waiting_status_adds_steer_hint_only_when_waiting() -> None:
-    waiting = str(render_notice(_notice(status="waiting_user_input"))[0].data["text"])
-    assert "codex_steer" in waiting
-    completed = str(render_notice(_notice(status="completed"))[0].data["text"])
-    assert "codex_steer" not in completed
+def test_fallback_waiting_status_adds_steer_hint_only_when_waiting() -> None:
+    assert "codex_steer" in fallback_text(_notice(status="waiting_user_input"))
+    assert "codex_steer" not in fallback_text(_notice(status="completed"))
 
 
-def test_body_text_is_clipped_to_limit() -> None:
-    text = str(render_notice(_notice(text="长" * (TEXT_LIMIT + 200)))[0].data["text"])
-    assert "…" in text
-    assert len(text) < TEXT_LIMIT + 200
+def test_fallback_never_contains_body_text() -> None:
+    assert "进展正常" not in fallback_text(_notice(text="进展正常"))
 
 
-def test_file_segments_map_kinds_and_name_only_plain_files() -> None:
-    notice = _notice(
-        files=(
-            _stored("image", "p.png"),
-            _stored("audio", "v.silk"),
-            _stored("video", "m.mp4"),
-            _stored("file", "report.pdf"),
-        )
-    )
-    segments = render_notice(notice)
-    assert [seg.type for seg in segments] == ["text", "image", "record", "video", "file"]
-    assert segments[1].data == {"file": "https://pub.example/bridge/files/tok/p.png"}
-    assert segments[2].data == {"file": "https://pub.example/bridge/files/tok/v.silk"}
-    assert segments[4].data == {
-        "file": "https://pub.example/bridge/files/tok/report.pdf",
-        "name": "report.pdf",
-    }
-
-
-async def test_notify_sends_private_message_and_records_delivery(store: AsyncSessionStore) -> None:
+async def test_text_only_notice_is_recorded_and_triggers_one_turn_without_direct_text(
+    store: AsyncSessionStore,
+) -> None:
     sender = RecordingSender()
-    notifier = QqNotifier(sender, store)
+    trigger = RecordingTrigger()
+    notifier = QqNotifier(sender, store, trigger)
+
     await notifier.notify(_notice(kind="turn_completed", status="completed"))
 
-    assert len(sender.messages) == 1
-    message = sender.messages[0]
-    assert (message.scope, message.target_id) == ("private", "1001")
+    assert sender.messages == []  # no direct text: the agent summarizes the record instead
+    assert trigger.calls == [("1001", "private:1001")]
 
     items = await store.load("private:1001")
     assert len(items) == 1
@@ -146,57 +136,121 @@ async def test_notify_sends_private_message_and_records_delivery(store: AsyncSes
     assert payload["title"] == "论文"
     assert payload["status"] == "completed"
     assert payload["files"] == 0
-    assert payload["delivered"] is True
+    assert payload["files_delivered"] is None
+    assert "进展正常" in json.dumps(payload["item"], ensure_ascii=False)
 
 
-async def test_history_record_carries_clipped_model_item_without_urls(
+async def test_notice_with_files_sends_only_attachment_segments_then_records_and_triggers(
     store: AsyncSessionStore,
 ) -> None:
-    notifier = QqNotifier(RecordingSender(), store)
-    long_body = "进展" * 2000  # longer than MODEL_TEXT_LIMIT, so it must be clipped
-    await notifier.notify(_notice(text=long_body, files=(_stored("file"),)))
+    sender = RecordingSender()
+    trigger = RecordingTrigger()
+    notifier = QqNotifier(sender, store, trigger)
+    notice = _notice(
+        files=(
+            _stored("image", "p.png"),
+            _stored("audio", "v.silk"),
+            _stored("video", "m.mp4"),
+            _stored("file", "report.pdf"),
+        )
+    )
+
+    await notifier.notify(notice)
+
+    assert len(sender.messages) == 1
+    message = sender.messages[0]
+    assert (message.scope, message.target_id) == ("private", "1001")
+    assert [seg.type for seg in message.segments] == ["image", "record", "video", "file"]
+    assert message.segments[0].data == {"file": "https://pub.example/bridge/files/tok/p.png"}
+    assert message.segments[3].data == {
+        "file": "https://pub.example/bridge/files/tok/report.pdf",
+        "name": "report.pdf",
+    }
+    assert trigger.calls == [("1001", "private:1001")]
+
     items = await store.load("private:1001")
-    payload = items[0].payload
-    assert "text" not in payload  # top-level metadata only; the body lives in the model item
-    rendered = json.dumps(payload["item"], ensure_ascii=False)
-    assert long_body not in rendered
-    assert "…" in rendered
-    assert "[系统通知]" in rendered
-    assert "a.bin" in rendered
-    assert "https://" not in rendered
+    assert len(items) == 1
+    assert items[0].payload["files"] == 4
+    assert items[0].payload["files_delivered"] is True
 
 
-async def test_send_result_not_ok_is_recorded_undelivered(
+async def test_file_send_not_ok_is_recorded_undelivered_and_still_triggers(
     store: AsyncSessionStore, caplog: pytest.LogCaptureFixture
 ) -> None:
-    notifier = QqNotifier(RecordingSender(SendResult(ok=False, error="rejected")), store)
+    trigger = RecordingTrigger()
+    notifier = QqNotifier(RecordingSender(SendResult(ok=False, error="rejected")), store, trigger)
     with caplog.at_level(logging.WARNING):
-        await notifier.notify(_notice())
+        await notifier.notify(_notice(files=(_stored("file"),)))
+
     items = await store.load("private:1001")
-    assert items[0].payload["delivered"] is False
+    assert items[0].payload["files_delivered"] is False
+    assert trigger.calls == [("1001", "private:1001")]
     assert "not delivered" in caplog.text
 
 
-async def test_send_exception_is_swallowed_and_logged_by_type_only(
+async def test_file_send_exception_is_swallowed_and_logged_by_type_only(
     store: AsyncSessionStore, caplog: pytest.LogCaptureFixture
 ) -> None:
-    notifier = QqNotifier(RecordingSender(error=RuntimeError("socket secret-detail")), store)
+    trigger = RecordingTrigger()
+    notifier = QqNotifier(
+        RecordingSender(error=RuntimeError("socket secret-detail")), store, trigger
+    )
     with caplog.at_level(logging.WARNING):
-        await notifier.notify(_notice())
+        await notifier.notify(_notice(files=(_stored("file"),)))
+
     items = await store.load("private:1001")
-    assert items[0].payload["delivered"] is False
+    assert items[0].payload["files_delivered"] is False
+    assert trigger.calls == [("1001", "private:1001")]
     assert "error=RuntimeError" in caplog.text
     assert "secret-detail" not in caplog.text
 
 
-async def test_history_failure_does_not_raise(caplog: pytest.LogCaptureFixture) -> None:
+async def test_trigger_failure_sends_plain_fallback_without_body_text(
+    store: AsyncSessionStore, caplog: pytest.LogCaptureFixture
+) -> None:
+    sender = RecordingSender()
+    notifier = QqNotifier(sender, store, RecordingTrigger(RuntimeError("queue secret-detail")))
+
+    with caplog.at_level(logging.WARNING):
+        await notifier.notify(_notice(kind="turn_failed", status="failed", text="进展正常"))
+
+    assert len(sender.messages) == 1
+    sent = _text_of(sender.messages[0])
+    assert sent.startswith("[Coding Agent] 任务失败：论文")
+    assert "状态：失败" in sent
+    assert "进展正常" not in sent
+    assert "error=RuntimeError" in caplog.text
+    assert "secret-detail" not in caplog.text
+    assert len(await store.load("private:1001")) == 1  # the record is kept for later turns
+
+
+async def test_record_failure_skips_trigger_and_sends_fallback(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     class FailingStore:
         async def append(self, *_args: object) -> None:
             raise OSError("disk full")
 
     sender = RecordingSender()
-    notifier = QqNotifier(sender, cast(AsyncSessionStore, FailingStore()))
+    trigger = RecordingTrigger()
+    notifier = QqNotifier(sender, cast(AsyncSessionStore, FailingStore()), trigger)
     with caplog.at_level(logging.WARNING):
         await notifier.notify(_notice())
+
+    assert trigger.calls == []
     assert len(sender.messages) == 1
+    assert _text_of(sender.messages[0]).startswith("[Coding Agent] 进度汇报：论文")
     assert "history record failed" in caplog.text
+
+
+async def test_target_of_maps_internal_user_to_qq_account(store: AsyncSessionStore) -> None:
+    async def account_of(user_id: str) -> str:
+        return f"qq-{user_id}"
+
+    sender = RecordingSender()
+    notifier = QqNotifier(
+        sender, store, RecordingTrigger(RuntimeError("no turn")), target_of=account_of
+    )
+    await notifier.notify(_notice(user_id="1001"))
+
+    assert [message.target_id for message in sender.messages] == ["qq-1001"]

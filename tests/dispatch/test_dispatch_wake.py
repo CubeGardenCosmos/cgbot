@@ -219,3 +219,91 @@ async def test_wake_after_shutdown_is_dropped(store: AsyncSessionStore) -> None:
 
     assert dispatcher._lanes == {}  # noqa: SLF001 - test inspects lanes
     assert provider.requests == []
+
+
+def notice_wake() -> PrivateMessage:
+    """Coding notice trigger: the notice record is already stored, so the wake adds no item."""
+    return PrivateMessage(
+        session_id=SID,
+        user_id=USER,
+        message_id=None,
+        item=None,
+        channel=SRC,
+        channels=(),
+    )
+
+
+async def test_notice_trigger_runs_turn_over_stored_record_without_extra_user_row(
+    store: AsyncSessionStore,
+) -> None:
+    clock = FakeTimebase()
+    gate = asyncio.Event()
+    gate.set()  # not blocking: this turn answers at once
+    provider = GatedProvider(text_resp("好的"), gate=gate)
+    dispatcher = PrivateDispatcher(make_runner(store, provider), clock)
+    await store.append(
+        SID, "system_event", {"event": "coding_notice", "item": user_message("[系统通知] 任务完成")}
+    )
+
+    assert dispatcher.on_wake(notice_wake()) is True
+    await flush()
+    assert provider.requests == []  # quiet window not yet over
+
+    await drain(dispatcher, clock)
+
+    assert len(provider.requests) == 1
+    assert "任务完成" in json.dumps(provider.requests[0].input, ensure_ascii=False)
+    stored = await store.load(SID)
+    assert [i.kind for i in stored if i.kind == "user"] == []
+    assert [i.kind for i in stored if i.kind == "system_event"] == ["system_event"]
+    await dispatcher.close()
+
+
+async def test_notice_trigger_waits_behind_running_turn_and_reads_the_record(
+    store: AsyncSessionStore,
+) -> None:
+    clock = FakeTimebase()
+    gate = asyncio.Event()
+    provider = GatedProvider(text_resp("第一条的回复"), text_resp("已转告"), gate=gate)
+    runner = make_runner(store, provider)
+    cancelled: list[str] = []
+    original_cancel = runner.cancel
+
+    def spy_cancel(session_id: str) -> bool:
+        cancelled.append(session_id)
+        return original_cancel(session_id)
+
+    runner.cancel = spy_cancel  # type: ignore[method-assign]
+    dispatcher = PrivateDispatcher(runner, clock)
+
+    dispatcher.on_message(user_msg("m1", "第一条"))
+    clock.advance(QUIET_SECONDS)
+    await asyncio.wait_for(provider.started.wait(), timeout=5)  # first turn is in flight
+
+    await store.append(
+        SID, "system_event", {"event": "coding_notice", "item": user_message("[系统通知] 任务完成")}
+    )
+    assert dispatcher.on_wake(notice_wake()) is True
+    await flush()
+    assert cancelled == []  # the trigger did not interrupt the running turn
+
+    gate.set()
+    await drain(dispatcher, clock)
+
+    assert cancelled == []
+    assert len(provider.requests) == 2
+    assert "任务完成" in json.dumps(provider.requests[1].input, ensure_ascii=False)
+    await dispatcher.close()
+
+
+async def test_notice_trigger_reports_dropped_wake_after_shutdown(
+    store: AsyncSessionStore,
+) -> None:
+    clock = FakeTimebase()
+    provider = GatedProvider(gate=asyncio.Event())
+    dispatcher = PrivateDispatcher(make_runner(store, provider), clock)
+    await dispatcher.close()
+
+    assert dispatcher.on_wake(notice_wake()) is False
+    await flush()
+    assert provider.requests == []

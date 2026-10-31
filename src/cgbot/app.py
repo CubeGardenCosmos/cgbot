@@ -105,7 +105,8 @@ CODING_PROMPT = (
     "你背后有一个 Coding Agent,通过 codex_* 工具使用,默认可以做任何事(调研、采集数据、写代码、"
     "操作浏览器、生成图片)。对方让你做需要动手完成的实事时,直接调用 codex_submit 交办,"
     "不要自己下结论说做不到,也不要先闲聊推脱;交办后用一两句人设口吻简短告知。"
-    "任务结果会以通知形式送达,不要轮询;完成时用一两句短话说结果,不讲技术细节、不列清单。"
+    "任务结果会以[系统通知]消息送达,不要轮询;收到通知后用一两句人设口吻简短总结结果,"
+    "不复述原文、不讲技术细节、不列清单。"
     "想知道进展时用 codex_btw 旁路询问(不打断、不排队),不要为此反复 codex_read 或 codex_peek。"
     "消息中标注已保存到沙盒的图片可按给出的 /workspace 路径交给 Coding Agent 使用。"
 )
@@ -292,7 +293,12 @@ class App:
                 config.coding,
                 upstream_base_url=config.provider.base_url,
                 upstream_api_key=config.provider.api_key,
-                notifier=QqNotifier(self._send, self._sessions, self._qq_account_of),
+                notifier=QqNotifier(
+                    self._send,
+                    self._sessions,
+                    self._start_coding_notice_turn,
+                    self._qq_account_of,
+                ),
                 queue_path=storage.for_module("coding"),
                 search_service=self._search,
                 gemini_client=self._gemini,
@@ -465,6 +471,34 @@ class App:
                 channels=identity.channels,
             )
         )
+
+    async def _start_coding_notice_turn(self, user_id: str, session_id: str) -> None:
+        """Queue one private turn over a Coding Agent notice already recorded in the session.
+
+        The notice record is the turn's input, so the item is None. The turn runs in the private
+        lane like any wake: after a running turn and the quiet window, never interrupting it.
+        Raises when no turn can be queued, so the notifier sends its plain-text fallback instead.
+        """
+        if self._closing:
+            raise RuntimeError("app is closing")
+        identity = await self._identity.identity_for_user(user_id)
+        if identity is None:
+            raise LookupError("unknown user")
+        if session_id != await self._identity.private_session_id(identity.user_id):
+            raise ValueError("session does not belong to user")
+        channel = await self._identity.preferred_channel(identity.user_id)
+        queued = self._dispatcher.on_wake(
+            PrivateMessage(
+                session_id=session_id,
+                user_id=identity.user_id,
+                message_id=None,
+                item=None,
+                channel=channel,
+                channels=identity.channels,
+            )
+        )
+        if not queued:
+            raise RuntimeError("private dispatcher is closing")
 
     async def _handle_group(self, message: InboundMessage) -> None:
         gid = message.group_id
