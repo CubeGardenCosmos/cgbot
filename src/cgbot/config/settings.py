@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Final, Literal
 
@@ -179,6 +180,24 @@ class SearchConfig:
     gemini: SearchGeminiConfig = field(default_factory=lambda: SearchGeminiConfig())
 
 
+DEFAULT_NEWS_OUTPUT_DIR: Final = "/home/klp/news-auto-collect/output"
+
+
+@dataclass(frozen=True, slots=True)
+class NewsConfig:
+    """``[news]``: daily 世界信号 push, read-only from the host producer's output directory.
+
+    ``push_time`` is local time in the IANA ``timezone``; the issue is pushed at or after it.
+    An incomplete issue is waited for until ``give_up_hour``; after that whatever exists is pushed.
+    """
+
+    enabled: bool = False
+    output_dir: Path = Path(DEFAULT_NEWS_OUTPUT_DIR)
+    push_time: time = time(8, 0)
+    give_up_hour: int = 12
+    timezone: str = "Asia/Shanghai"
+
+
 @dataclass(frozen=True, slots=True)
 class Config:
     napcat: NapCatConfig
@@ -190,3 +209,4 @@ class Config:
     voice: VoiceConfig | None = None  # None: [voice] table absent, voice disabled
     coding: CodingConfig | None = None  # None: [coding] absent or enabled = false
     search: SearchConfig = field(default_factory=lambda: SearchConfig())
+    news: NewsConfig = field(default_factory=lambda: NewsConfig())

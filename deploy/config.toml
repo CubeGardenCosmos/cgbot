@@ -57,6 +57,13 @@ model = "gemini-2.5-flash"
 [logging]
 level = "INFO"
 
+[news]
+enabled = true                            # 世界信号每日推送(私聊订阅);输出目录须只读挂载进容器
+output_dir = "/home/klp/news-auto-collect/output"   # 与 docker-compose.yml 中的挂载路径一致
+push_time = "08:00"
+give_up_hour = 12
+timezone = "Asia/Shanghai"
+
 [coding]
 enabled = true
 token_secret = "secret:coding_token"      # HMAC 密钥;每个沙盒令牌由它派生

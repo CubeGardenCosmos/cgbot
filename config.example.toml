@@ -133,3 +133,10 @@ skill_habits_per_member = 5 # 每位成员的习惯条数上限
 
 [logging]
 level = "INFO"       # DEBUG / INFO / WARNING / ERROR / CRITICAL
+
+# [news]                                    # 世界信号每日推送,默认关闭;只读生成端输出目录
+# enabled = false
+# output_dir = "/home/klp/news-auto-collect/output"   # 宿主机路径;容器内以同一路径只读挂载
+# push_time = "08:00"                       # 本地时间 HH:MM,到点起推送
+# give_up_hour = 12                         # 刊未齐时等到该整点(1–23)后推已有内容
+# timezone = "Asia/Shanghai"                # IANA 时区名

@@ -33,6 +33,7 @@
 - `deploy/secrets.toml.example` 只列名字。真实 `/home/klp/cgbot-run/secrets.toml` 必须 `chmod 600`,挂载为只读 `/run/secrets/cgbot.toml`。需要的名字:`provider_api_key`、`coding_token`,可选 `imagegen_key`。
 - 容器内路径约定:数据目录 `[storage] data_dir = "/app/data"`(绝对路径);`[coding.bridge] temp_dir = "/app/data/bridge"`(绝对路径)。宿主机 `/home/klp/cgbot-run/state` 挂载为 `/app/data`。
 - 占位值:`[provider] context_window = 128000`(标注待查证);`[scope]` 的 `friends`/`groups` 为空列表(全部拒绝,安全默认);`[coding.imagegen]` 省略(图像生成不可用)。
+- `[news]`:模板中 `enabled = true`。`output_dir`(`/home/klp/news-auto-collect/output`)须与 compose 中只读挂载的容器内路径相同;生成端写入、bot 只读。
 
 ## 4. 宿主机布局(手工一次性创建,deploy.sh 不创建)
 
@@ -44,6 +45,7 @@
   config.toml                     手工,0644
   secrets.toml                    手工,0600
   state/                          手工创建;bot SQLite 与 bridge 临时文件
+/home/klp/news-auto-collect/output/  世界信号生成端输出;容器内同路径只读挂载(compose `:ro`)
 /home/klp/cgbot-data/             沙盒工作区;容器内同路径挂载(Docker 守护进程按宿主机路径解析)
 ```
 
@@ -94,6 +96,7 @@ deploy/deploy.sh --rollback <tag>   # 切换到已存在的 cgbot:<tag> 并重�
 
 - 未执行 `compose up`:真实 NapCat 连入、coding 服务 `/healthz`(当前容器 HEALTHCHECK 预期失败)、沙盒并发内存、`context_window` 实际值。
 - Docker 代理白名单是否满足 M5 manager 的全部调用(`/images/*`、logs、wait 未在旧 haproxy 白名单中)。
+- 世界信号:未对真实 NapCat 与真实 `delivery.json` 联调;宿主机输出目录的权限与生成时刻未实测。
 - 容器内 `/healthz` 与 `bridge` 端到端路径未测,依赖 slice A/D/E。
 
 ## 10. omp 搜索 relay(宿主机,未部署)
