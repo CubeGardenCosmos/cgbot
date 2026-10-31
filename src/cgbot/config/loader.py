@@ -7,13 +7,10 @@ import re
 import stat
 import tomllib
 from collections.abc import Mapping
-from datetime import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Final
-from zoneinfo import ZoneInfo
 
 from cgbot.config.settings import (
-    DEFAULT_NEWS_OUTPUT_DIR,
     SEARCH_ENGINE_NAMES,
     WIRE_APIS,
     Config,
@@ -21,7 +18,6 @@ from cgbot.config.settings import (
     GroupConfig,
     LoggingConfig,
     NapCatConfig,
-    NewsConfig,
     ProviderConfig,
     ReasoningTiers,
     ScopeConfig,
@@ -84,7 +80,6 @@ def load_config(
     search = _search(root.sub("search"), source)
     voice_raw = root.raw_table("voice")
     coding_raw = root.raw_table("coding")
-    news = _news(root.sub("news"), config_path.parent)
     root.close()
 
     return Config(
@@ -95,7 +90,6 @@ def load_config(
         storage=storage,
         logging=logging_cfg,
         search=search,
-        news=news,
         voice=load_voice_config(voice_raw) if voice_raw is not None else None,
         coding=(
             _coding(coding_raw, source, config_path.parent, provider.context_window)
@@ -193,30 +187,6 @@ def _logging(t: _Table) -> LoggingConfig:
         raise t.error("level", "须为 DEBUG/INFO/WARNING/ERROR/CRITICAL 之一")
     t.close()
     return LoggingConfig(level=level)
-
-
-def _news(t: _Table, base_dir: Path) -> NewsConfig:
-    enabled = t.bool_or("enabled", False)
-    output_dir = t.text_or("output_dir", DEFAULT_NEWS_OUTPUT_DIR)
-    push = re.fullmatch(r"([01]\d|2[0-3]):([0-5]\d)", t.text_or("push_time", "08:00"))
-    if push is None:
-        raise t.error("push_time", "须为 HH:MM 格式的本地时间,如 08:00")
-    give_up_hour = t.positive_int_or("give_up_hour", 12)
-    if give_up_hour > 23:
-        raise t.error("give_up_hour", "须为 1–23 的整数小时")
-    timezone = t.text_or("timezone", "Asia/Shanghai")
-    try:
-        ZoneInfo(timezone)
-    except (KeyError, ValueError):
-        raise t.error("timezone", "须为有效的 IANA 时区名,如 Asia/Shanghai") from None
-    t.close()
-    return NewsConfig(
-        enabled=enabled,
-        output_dir=base_dir / output_dir,
-        push_time=time(int(push.group(1)), int(push.group(2))),
-        give_up_hour=give_up_hour,
-        timezone=timezone,
-    )
 
 
 def _search(t: _Table, source: _SecretSource) -> SearchConfig:

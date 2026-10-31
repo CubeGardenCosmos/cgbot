@@ -17,7 +17,6 @@ from collections.abc import Coroutine, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
-from zoneinfo import ZoneInfo
 
 from cgbot.agent import AgentRunner, TurnResult, builtin_tools
 from cgbot.agent.tools import ToolContext, ToolResult, ToolSpec
@@ -45,7 +44,6 @@ from cgbot.model import (
     SendResult,
 )
 from cgbot.napcat import NapCatServer
-from cgbot.news import NewsPusher, NewsStore, local_clock, news_fetch_tool, news_subscribe_tool
 from cgbot.omp import OmpService, OmpStore
 from cgbot.omp.client import ClientFactory, default_client_factory
 from cgbot.provider import ModelProvider, Usage, user_message
@@ -97,8 +95,6 @@ SYSTEM_PROMPT = """\
 - 真诚亲切的好友,随意自然,会吐槽日常。绝不用客服口吻("请问有什么可以帮您""我是人工智能"一律禁止)。
 - 口语化,常省略主语,不要每句机械地自称。熟悉中文互联网的热梗和黑话,接地气、会接梗。
 - 遇到可能是梗/黑话的内容时,自行调用 meme_lookup 查询,不要凭猜测。
-- 用户要订阅、取消或查询「世界信号」每日新闻摘要时调用 news_subscribe;
-  想立刻看今天的世界信号时调用 news_fetch。
 - 主人是 KLP(QQ 2749478757):对 KLP 更亲切活泼,可以撒娇打闹,称呼 KLP 或主人。其他人当普通好友。
 - 给足情绪价值:对方开心就跟着开心,难过就先接住情绪、认真陪着,再轻轻地出主意;
   对方做成了事要真诚夸,累了就安慰,低落时别讲大道理。回应要具体、贴着对方说的内容,
@@ -319,39 +315,12 @@ class App:
             ImageStager(config.coding.docker.host_data_dir) if config.coding is not None else None
         )
         self._memes = MemeStore(storage.for_module("meme"))
-        news_cfg = config.news
-        self._news: NewsStore | None = (
-            NewsStore(storage.for_module("news")) if news_cfg.enabled else None
-        )
-        self._news_pusher: NewsPusher | None = (
-            NewsPusher(
-                store=self._news,
-                output_dir=news_cfg.output_dir,
-                send=self._send,
-                target_of=self._qq_account_of,
-                push_time=news_cfg.push_time,
-                give_up_hour=news_cfg.give_up_hour,
-                clock=local_clock(ZoneInfo(news_cfg.timezone)),
-            )
-            if self._news is not None
-            else None
-        )
         registry = builtin_tools()
         for spec in memory_tools(self._memory):
             registry.register(spec)
         for spec in search_tools(self._search, gemini_client=self._gemini):
             registry.register(spec)
         registry.register(meme_lookup_tool(self._memes))
-        if self._news is not None:
-            push_time = news_cfg.push_time.strftime("%H:%M")
-            registry.register(news_subscribe_tool(self._news, push_time))
-            registry.register(
-                news_fetch_tool(
-                    news_cfg.output_dir,
-                    self._qq_account_of,
-                    local_clock(ZoneInfo(news_cfg.timezone)),
-                )
-            )
         if self._voice is not None:
             registry.register(self._send_voice_tool(self._voice))
         if self._coding is not None:
@@ -402,7 +371,6 @@ class App:
         )
         self._tasks: set[asyncio.Task[object]] = set()
         self._sweep_task: asyncio.Task[None] | None = None
-        self._news_task: asyncio.Task[None] | None = None
         self._closing = False
 
     async def start(self) -> None:
@@ -413,16 +381,12 @@ class App:
         await self.napcat.start()
         await self._scheduler.start()
         self._sweep_task = asyncio.create_task(self._sweep_loop(), name="group-sweep")
-        if self._news_pusher is not None:
-            self._news_task = asyncio.create_task(self._news_pusher.run(), name="news-push")
         log.info("cgbot started: napcat_port=%s", self.napcat.bound_port)
 
     async def stop(self) -> None:
         self._closing = True
         if self._sweep_task is not None:
             await _cancel_tasks([self._sweep_task])
-        if self._news_task is not None:
-            await _cancel_tasks([self._news_task])
         await self.napcat.stop()
         await self._dispatcher.close()
         await _cancel_tasks(list(self._tasks))
@@ -438,8 +402,6 @@ class App:
         self._group_state.close()
         self._group_skills.close()
         self._memes.close()
-        if self._news is not None:
-            self._news.close()
         self._omp_store.close()
         if self._voice is not None:
             for service in self._voice.services:

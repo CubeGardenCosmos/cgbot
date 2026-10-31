@@ -6,7 +6,6 @@
 #   /home/klp/cgbot-run/secrets.toml         real secrets (0600, never in git)
 #   /home/klp/cgbot-run/state/               bot SQLite / bridge temp (-> /app/data)
 #   /home/klp/cgbot-data/                    sandbox workspaces (same path inside bot)
-#   /home/klp/news-auto-collect/output/     世界信号 daily output (producer-owned; bot mounts it read-only)
 #
 # Start: deploy/deploy.sh --up   (never `compose up` without the external networks existing)
 
@@ -37,8 +36,6 @@ services:
       - ./state:/app/data
       # Sandbox bind mounts are resolved by the HOST Docker daemon, so the path must match.
       - ${HOST_DATA_DIR:-/home/klp/cgbot-data}:${HOST_DATA_DIR:-/home/klp/cgbot-data}
-      # 世界信号 producer output, read-only, same path (news digest reads delivery.json only).
-      - /home/klp/news-auto-collect/output:/home/klp/news-auto-collect/output:ro
     extra_hosts: ["host.docker.internal:host-gateway"]   # imagegen proxy on the host (as the old manager)
     networks:
       - dsh_caged_internal         # sandboxes reach http://cgbot:8000 (gateway/bridge)

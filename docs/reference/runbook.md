@@ -71,7 +71,6 @@ secrets 文件权限必须为 `0600`(组和其他用户不得有任何权限),�
 | `group_state.sqlite` | 群门控状态 |
 | `group_skill.sqlite` | 群 SKILL |
 | `meme.sqlite` | 群梗词条表(按群隔离;群会话总结写入。`meme_lookup` 工具:群会话只查本群,私聊可查全部群) |
-| `news.sqlite` | 世界信号(`[news]`):订阅者(`subscribers`)与每人每期发送台账(`sent`),重启不重发 |
 
 数据目录不入库;删除任一文件会丢失对应数据,操作前先备份。
 
@@ -102,15 +101,7 @@ uv run pytest
 - `pilk` 未安装:SILK 编码不可用,`send_voice` 调用会失败并返回错误结果;需先在授权环境添加依赖后再验证 record 发送。
 - 群聊真实边界(唤醒、静音、会话结束与总结的真实群行为)。
 - 配置中所有标注 `[推论]` 的默认值(上限、档位映射、超时)。
-- 世界信号(`[news]`):真实 NapCat 对 `base64://` 图片/文件段的收发、真实长图的 6000px 切片观感、推送时刻与 `give_up_hour` 行为、容器内只读挂载的可读性。仅有离线单元测试证据,未对真实 `delivery.json` 联调。
 
 ## 11. 部署(M5 容器)
 
 镜像构建、compose、宿主机目录与切换步骤见 [部署参考](deploy.md)。
-
-## 12. 世界信号推送(可选)
-
-- 启用:`[news] enabled = true`(`config.example.toml` 默认关闭)。`output_dir` 是生成端写入 `<日期>/delivery.json` 的目录;容器内须只读挂载到同一路径(见 [部署参考](deploy.md) §4)。
-- 推送时刻 `push_time`(默认 08:00)按 `timezone`(默认 Asia/Shanghai)计算。刊未 `complete` 时等到 `give_up_hour`(默认 12)再推送已有部分;一份都没有则推送致歉语。
-- 只读消费 `output_dir`,不触发生成。用户在私聊中通过 `news_subscribe` / `news_fetch` 工具订阅、取消、查询或立即取当天刊;群聊不提供。
-- 用户与 QQ 账号的映射与 coding 通知一致(`target_of`)。

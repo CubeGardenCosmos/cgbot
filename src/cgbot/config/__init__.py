@@ -16,9 +16,6 @@ File format (see ``config.example.toml`` at the repo root for a commented copy):
   (chat records), ``scheduler.sqlite``, and ``<module>.sqlite`` for later modules.
 - ``[group]``: ``wake_keywords`` (default ``["大肥鱼"]``), ``mute_keywords`` (default empty).
 - ``[logging]``: ``level`` (default ``INFO``).
-- ``[news]``: ``enabled`` (default false), ``output_dir`` (read-only daily output of the
-  host producer), ``push_time`` (``HH:MM``, default ``08:00``), ``give_up_hour`` (default 12),
-  ``timezone`` (IANA name, default ``Asia/Shanghai``).
 
 Secrets: the config only names them. Values come from the secrets TOML ``[secrets]`` table
 (path: ``secrets_path`` argument, else env ``CGBOT_SECRETS_FILE``; must be mode 0600) and can
@@ -34,7 +31,6 @@ from cgbot.config.settings import (
     GroupConfig,
     LoggingConfig,
     NapCatConfig,
-    NewsConfig,
     ProviderConfig,
     ReasoningTiers,
     Scope,
@@ -51,7 +47,6 @@ __all__ = [
     "GroupConfig",
     "LoggingConfig",
     "NapCatConfig",
-    "NewsConfig",
     "ProviderConfig",
     "ReasoningTiers",
     "Scope",
