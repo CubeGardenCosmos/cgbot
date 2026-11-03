@@ -30,7 +30,7 @@
 ## 3. 配置与密钥
 
 - `deploy/config.toml` 是模板。真实文件位于宿主机 `/home/klp/cgbot-run/config.toml`(0644,不含密钥),挂载为只读 `/app/config/config.toml`。补全所有带 `【占位】` 的项后,`deploy.sh` 才会放行。
-- `deploy/secrets.toml.example` 只列名字。真实 `/home/klp/cgbot-run/secrets.toml` 必须 `chmod 600`,挂载为只读 `/run/secrets/cgbot.toml`。需要的名字:`provider_api_key`、`coding_token`,可选 `imagegen_key`。
+- `deploy/secrets.toml.example` 只列名字。真实 `/home/klp/cgbot-run/secrets.toml` 必须 `chmod 600`,挂载为只读 `/run/secrets/cgbot.toml`。需要的名字:`provider_api_key`(Bot 对话)、`coding_token`、`gateway_api_key`(网关上游),可选 `imagegen_key`。
 - 容器内路径约定:数据目录 `[storage] data_dir = "/app/data"`(绝对路径);`[coding.bridge] temp_dir = "/app/data/bridge"`(绝对路径)。宿主机 `/home/klp/cgbot-run/state` 挂载为 `/app/data`。
 - 占位值:`[provider] context_window = 128000`(标注待查证);`[scope]` 的 `friends`/`groups` 为空列表(全部拒绝,安全默认);`[coding.imagegen]` 省略(图像生成不可用)。
 

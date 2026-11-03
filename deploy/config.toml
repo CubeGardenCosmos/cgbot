@@ -16,7 +16,7 @@ all_friends = true     # 2026-10-31:对所有真实 QQ 好友开放私聊
 owner = 2749478757
 
 [provider]
-base_url = "http://141.11.76.101:8788/v1"   # 已查证原生支持 Responses(DESIGN §13.6c 更正)
+base_url = "https://api.cicori.com/v1"      # 兼容 Responses 与 Chat Completions
 model = "deepseek-v4.1-flash"
 wire_api = "responses"
 context_window = 128000                     # [推论] 未向上游查证;压缩阈值按此计算
@@ -60,6 +60,7 @@ level = "INFO"
 [coding]
 enabled = true
 token_secret = "secret:coding_token"      # HMAC 密钥;每个沙盒令牌由它派生
+upstream_api_key = "secret:gateway_api_key"  # 网关转发上游的专用密钥
 
 [coding.http]                             # 网关 + bridge 共用一个 aiohttp 服务
 host = "0.0.0.0"

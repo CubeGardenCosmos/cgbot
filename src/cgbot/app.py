@@ -297,7 +297,7 @@ class App:
             CodingStack(
                 config.coding,
                 upstream_base_url=config.provider.base_url,
-                upstream_api_key=config.provider.api_key,
+                upstream_api_key=config.coding.upstream_api_key or config.provider.api_key,
                 notifier=QqNotifier(
                     self._send,
                     self._sessions,

@@ -74,10 +74,11 @@ skill_habits_per_member = 5 # 每位成员的习惯条数上限
 # path_rules = [{ remote = "/远端数据目录", local = "/本机数据目录" }]
 
 # 编程代理(M5,可选)。省略整节 = 关闭。整节一经出现即完整校验(enabled = false 时亦然)。
-# 上游 Responses 地址与密钥取自 [provider];token_secret 与 imagegen.api_key 须为 "secret:<名>"。
+# 上游 Responses 地址取自 [provider],密钥默认同 [provider](可用 upstream_api_key 单独指定);token_secret 与 imagegen.api_key 须为 "secret:<名>"。
 # [coding]
 # enabled = true
 # token_secret = "secret:coding_token"    # 沙箱令牌的 HMAC 密钥(在 secrets 中定义)
+# upstream_api_key = "secret:gateway_key" # 可选;网关转发上游用的密钥,省略 = 沿用 [provider] 密钥
 # [coding.http]                           # 网关与桥接共用一个 HTTP 服务
 # host = "0.0.0.0"
 # port = 8000

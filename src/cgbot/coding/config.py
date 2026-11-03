@@ -123,3 +123,4 @@ class CodingConfig:
     concurrency: ConcurrencyConfig
     bridge: BridgeConfig
     imagegen: ImageGenConfig | None
+    upstream_api_key: Secret | None = None  # None = reuse [provider] api_key

@@ -258,6 +258,9 @@ def _coding(
     t = _Table(raw, "coding")
     enabled = t.bool_or("enabled", True)
     token_secret = t.secret_ref("token_secret", source)
+    upstream_api_key = (
+        t.secret_ref("upstream_api_key", source) if t.optional_text("upstream_api_key") else None
+    )
 
     http_t = t.sub("http", required=True)
     http = coding_cfg.HttpConfig(
@@ -316,6 +319,7 @@ def _coding(
         return None
     return coding_cfg.CodingConfig(
         token_secret=token_secret,
+        upstream_api_key=upstream_api_key,
         http=http,
         docker=docker,
         codex=codex,
