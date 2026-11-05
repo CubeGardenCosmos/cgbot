@@ -68,7 +68,7 @@ skill_memes = 10            # 群技能:梗条数上限
 skill_rules = 10            # 群技能:群规条数上限
 skill_members = 20          # 群技能:成员条数上限
 skill_habits_per_member = 5 # 每位成员的习惯条数上限
-timezone = "Asia/Kuala_Lumpur"  # IANA 时区名;群门控的本地小时(睡眠 00–08、主动 08–24)与日志时间戳均按此计,不依赖进程 TZ;非法名称启动失败
+timezone = "Asia/Kuala_Lumpur"  # IANA 时区名;群门控的本地小时(睡眠 00–08、主动 08–24)、日志时间戳与模型所见消息时间戳均按此计,不依赖进程 TZ;非法名称启动失败
 
 # 语音(可选)。省略整节 = 语音关闭:私聊语音只记为 [语音],不注册 send_voice 工具。
 # 语音转写失败时私聊内容为 [语音识别失败]。

@@ -48,7 +48,7 @@ secrets 文件权限必须为 `0600`(组和其他用户不得有任何权限),�
 | `idle_timeout_seconds` | 群会话空闲结束秒数(默认 600) |
 | `max_turns` | 单次群会话最多轮数(默认 30) |
 | `skill_topics` / `skill_memes` / `skill_rules` / `skill_members` / `skill_habits_per_member` | 群 SKILL 各类条目上限;`skill_memes` 只限制卡内梗条目,梗不再进入群提示词(见 `meme.sqlite`) |
-| `timezone` | IANA 时区名(默认 `Asia/Kuala_Lumpur`)。群门控的本地小时(睡眠 00:00–08:00、主动 08:00–24:00、小时抽样键)与日志时间戳都按此时区计算,不依赖进程 `TZ`;非法名称使启动失败(键路径 `group.timezone`)。部署的 `TZ` 环境变量应保持一致 |
+| `timezone` | IANA 时区名(默认 `Asia/Kuala_Lumpur`)。群门控的本地小时(睡眠 00:00–08:00、主动 08:00–24:00、小时抽样键)、日志时间戳、以及模型所见消息时间戳(`[2026-11-05 09:41 周四]`,私聊与群聊,见 DESIGN §13.2c)都按此时区计算,不依赖进程 `TZ`;非法名称使启动失败(键路径 `group.timezone`)。部署的 `TZ` 环境变量应保持一致 |
 
 后台每 30 秒执行一次群会话超时扫描。进程启动时群会话从存储恢复。
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from cgbot.provider import (
     ModelRequest,
@@ -15,6 +16,7 @@ from cgbot.provider import (
 from cgbot.session import AsyncSessionStore
 
 SID = "private:u1"
+TZ = ZoneInfo("Asia/Kuala_Lumpur")
 
 
 class FakeProvider:

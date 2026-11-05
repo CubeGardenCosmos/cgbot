@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from cgbot.agent.history import COMPACTION_PREFIX, expand_window, to_input_items
 from cgbot.provider import user_message
 from cgbot.session import Item
+
+TZ = ZoneInfo("Asia/Kuala_Lumpur")
 
 
 def _row(seq: int, kind: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -47,7 +50,7 @@ def test_retained_rows_follow_the_summary_with_their_original_seq() -> None:
 
 def test_summary_and_retained_pair_render_as_a_valid_tool_exchange() -> None:
     window = [_compaction(9, [_call_row(4, "c1"), _result_row(5, "c1")])]
-    items = to_input_items(window)
+    items = to_input_items(window, tz=TZ)
     assert items[0] == user_message(COMPACTION_PREFIX + "S")
     assert [i["type"] for i in items[1:]] == ["function_call", "function_call_output"]
     assert items[2]["call_id"] == "c1"
@@ -55,9 +58,9 @@ def test_summary_and_retained_pair_render_as_a_valid_tool_exchange() -> None:
 
 def test_output_whose_call_was_summarised_away_is_dropped() -> None:
     window = [_compaction(9, [_result_row(5, "gone")])]
-    assert to_input_items(window) == [user_message(COMPACTION_PREFIX + "S")]
+    assert to_input_items(window, tz=TZ) == [user_message(COMPACTION_PREFIX + "S")]
 
 
 def test_without_retained_rows_only_the_summary_is_rendered() -> None:
     window = [_compaction(9, [])]
-    assert to_input_items(window) == [user_message(COMPACTION_PREFIX + "S")]
+    assert to_input_items(window, tz=TZ) == [user_message(COMPACTION_PREFIX + "S")]

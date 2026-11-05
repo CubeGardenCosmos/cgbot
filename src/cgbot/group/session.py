@@ -19,6 +19,7 @@ import time
 from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from dataclasses import dataclass, replace
 from typing import Literal
+from zoneinfo import ZoneInfo
 
 from cgbot.agent import AgentRunner, TurnContext, TurnResult
 from cgbot.group.buffer import BufferedMessage
@@ -47,6 +48,7 @@ from cgbot.provider import (
     user_message,
 )
 from cgbot.session import AsyncSessionStore
+from cgbot.timefmt import format_stamp, time_instruction
 from cgbot.vision import Vision, segment_image_urls
 
 log = logging.getLogger(__name__)
@@ -133,7 +135,8 @@ def _boundary_text(reason: EndReason, summary: SessionSummary | None, status: Su
     return base + ",未生成总结。"
 
 
-def _instructions(base: str, card: SkillCard | None) -> str:
+def _instructions(base: str, card: SkillCard | None, tz: ZoneInfo) -> str:
+    base += time_instruction(tz)
     if card is None:
         return base
     return f"{base}\n\n# 本群 SKILL(历次群聊总结,仅本群有效)\n{render_card_text(card)}"
@@ -155,6 +158,7 @@ class GroupSessionManager:
         policy: GroupSessionPolicy,
         chat_reasoning_effort: str | None,
         summary_reasoning_effort: str | None,
+        tz: ZoneInfo,
         clock: Callable[[], float] = time.time,
         vision: Vision | None = None,
     ) -> None:
@@ -170,6 +174,7 @@ class GroupSessionManager:
         self._summary_effort = summary_reasoning_effort
         self._clock = clock
         self._vision = vision
+        self._tz = tz
         self._active: dict[str, _Session] = {}
         self._locks: dict[str, asyncio.Lock] = {}
 
@@ -274,7 +279,9 @@ class GroupSessionManager:
         channel = Channel("qq", session.group_id)
         vision = self._vision
         if trigger == "proactive":
-            lines = [f"[成员 {b.user_id}] {b.text}" for b in buffered]
+            lines = [
+                f"{format_stamp(b.ts, self._tz)} [成员 {b.user_id}] {b.text}" for b in buffered
+            ]
             text = PROACTIVE_PROMPT + "\n" + "\n".join(lines)
             item = (
                 await vision.attach(
@@ -349,11 +356,12 @@ class GroupSessionManager:
             _EndGuardProvider(self._provider, control),
             self._sessions,
             tools,
-            _instructions(GROUP_INSTRUCTIONS, card),
+            _instructions(GROUP_INSTRUCTIONS, card, self._tz),
             self._sender,
             reasoning_effort=self._chat_effort,
             images=self._vision.store if self._vision is not None else None,
             recent_image_turns=self._vision.recent_image_turns if self._vision is not None else 0,
+            tz=self._tz,
         )
         return _Session(
             group_id=group_id,

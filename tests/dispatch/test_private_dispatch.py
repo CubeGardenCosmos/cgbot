@@ -8,9 +8,11 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -138,7 +140,27 @@ def make_runner(
         tools=tools if tools is not None else builtin_tools(),
         instructions="be brief",
         sender=_send,
+        tz=ZoneInfo("Asia/Kuala_Lumpur"),
     )
+
+
+_STAMP_PART = re.compile(r"\[\d{4}-\d\d-\d\d \d\d:\d\d 周.\] ")
+
+
+def unstamped(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """``items`` without the leading timestamp part of user messages (their time is real)."""
+    out: list[dict[str, Any]] = []
+    for item in items:
+        content = item.get("content")
+        if (
+            item.get("role") == "user"
+            and isinstance(content, list)
+            and content
+            and _STAMP_PART.fullmatch(content[0].get("text", ""))
+        ):
+            item = {**item, "content": content[1:]}
+        out.append(item)
+    return out
 
 
 def msg(message_id: str, text: str) -> PrivateMessage:
@@ -263,8 +285,11 @@ async def test_messages_in_quiet_window_merge_in_arrival_order(store: AsyncSessi
     clock.advance(2)  # t=7
     await drain(dispatcher, clock)
     assert len(provider.requests) == 1
-    inp = provider.requests[0].input
+    inp = unstamped(provider.requests[0].input)
     assert inp.index(user_message("一")) < inp.index(user_message("二"))
+    # coalesced messages stay separate items, each with its own leading stamp
+    users = [i for i in provider.requests[0].input if i.get("role") == "user"]
+    assert [len(u["content"]) for u in users] == [2, 2]
     assert await stored_user_ids(store) == ["m1", "m2"]
     await dispatcher.close()
 
@@ -285,7 +310,7 @@ async def test_message_without_tool_interrupts_and_restarts_with_new_items_only(
     await drain(dispatcher, clock)
 
     assert len(provider.requests) == 2
-    inp = provider.requests[1].input
+    inp = unstamped(provider.requests[1].input)
     assert inp.count(user_message("一")) == 1
     assert inp.count(user_message("二")) == 1
     assert await stored_user_ids(store) == ["m1", "m2"]
@@ -312,7 +337,7 @@ async def test_message_after_tool_call_is_injected_without_interrupt(
     await drain(dispatcher, clock)
 
     assert len(provider.requests) == 2
-    assert provider.requests[1].input[-1] == user_message("二")
+    assert unstamped(provider.requests[1].input)[-1] == user_message("二")
     assert await stored_user_ids(store) == ["m1", "m2"]
     await dispatcher.close()
 

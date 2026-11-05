@@ -18,6 +18,7 @@ import logging
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import tzinfo
 from typing import Any, Literal, Protocol
 
 from cgbot.agent.history import expand_window, render_items
@@ -121,6 +122,7 @@ class Compactor:
         tiers: ReasoningTiers,
         *,
         is_busy: Callable[[str], bool],
+        tz: tzinfo,
         clock: Callable[[], float] = time.time,
         reserved_tokens: int = 0,
         keep_exchanges: int = KEEP_EXCHANGES,
@@ -143,6 +145,7 @@ class Compactor:
         self._keep = keep_exchanges
         self._idle = idle_seconds
         self._instructions = summary_instructions
+        self._tz = tz
         self._usage: dict[str, _UsageMark] = {}
         self._running: set[str] = set()
 
@@ -161,11 +164,10 @@ class Compactor:
         newer = [item for item in window if item.seq > mark.through_seq]
         return mark.input_tokens + self._estimate(newer)
 
-    @staticmethod
-    def _estimate(window: list[Item]) -> int:
+    def _estimate(self, window: list[Item]) -> int:
         if not window:
             return 0
-        return estimate_tokens(render_items(expand_window(window)))
+        return estimate_tokens(render_items(expand_window(window), tz=self._tz))
 
     async def maybe_compact(self, session_id: str) -> CompactionOutcome:
         """Compact if the window reached 50% of the provider's context window."""

@@ -5,7 +5,7 @@ import time
 from pathlib import Path
 
 import pytest
-from compaction_fakes import SID, FakeProvider, Rows
+from compaction_fakes import SID, TZ, FakeProvider, Rows
 
 from cgbot.compaction import IDLE_SECONDS, Compactor
 from cgbot.config.settings import ReasoningTiers
@@ -53,6 +53,7 @@ def _compactor(
         scheduler,
         ReasoningTiers(),
         is_busy=lambda _sid: busy,
+        tz=TZ,
         clock=clock,
     )
 

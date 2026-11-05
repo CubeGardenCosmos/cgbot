@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 
-from compaction_fakes import SID, FakeProvider, Rows
+from compaction_fakes import SID, TZ, FakeProvider, Rows
 
 from cgbot.compaction import Compactor
 from cgbot.config.settings import ReasoningTiers
@@ -23,7 +23,7 @@ async def test_summary_request_has_the_marker_but_no_image_blobs(
     provider = FakeProvider()
 
     out = await Compactor(
-        provider, store, None, ReasoningTiers(), is_busy=lambda _sid: False
+        provider, store, None, ReasoningTiers(), is_busy=lambda _sid: False, tz=TZ
     ).compact(SID)
 
     assert out.status == "compacted"

@@ -10,6 +10,7 @@ import json
 from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -102,6 +103,7 @@ def make_runner(store: AsyncSessionStore, provider: GatedProvider) -> AgentRunne
         tools=builtin_tools(),
         instructions="be brief",
         sender=_send,
+        tz=ZoneInfo("Asia/Kuala_Lumpur"),
     )
 
 

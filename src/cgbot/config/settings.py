@@ -130,7 +130,8 @@ class ProviderConfig:
 @dataclass(frozen=True, slots=True)
 class GroupConfig:
     """Group chat settings: keyword rules, session lifetime, group skill-card limits, and the
-    IANA ``timezone`` that defines the local clock for gate hours and log timestamps."""
+    IANA ``timezone`` that defines the local clock for gate hours, log timestamps and the message
+    timestamps the model sees."""
 
     wake_keywords: tuple[str, ...]
     mute_keywords: tuple[str, ...]

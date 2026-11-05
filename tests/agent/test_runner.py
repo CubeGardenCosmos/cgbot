@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -34,6 +36,7 @@ from cgbot.provider import (
     user_message,
 )
 from cgbot.session import AsyncSessionStore, Item, Kind
+from cgbot.timefmt import format_stamp
 
 SRC = Channel("qq", "10001")
 OTHER = Channel("qq", "20002")
@@ -104,6 +107,27 @@ class ScriptedProvider:
         raise NotImplementedError
 
 
+TZ = ZoneInfo("Asia/Kuala_Lumpur")
+
+_STAMP_PART = re.compile(r"\[\d{4}-\d\d-\d\d \d\d:\d\d 周.\] ")
+
+
+def unstamped(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """``items`` without the leading timestamp part of user messages (their time is real)."""
+    out: list[dict[str, Any]] = []
+    for item in items:
+        content = item.get("content")
+        if (
+            item.get("role") == "user"
+            and isinstance(content, list)
+            and content
+            and _STAMP_PART.fullmatch(content[0].get("text", ""))
+        ):
+            item = {**item, "content": content[1:]}
+        out.append(item)
+    return out
+
+
 class RecordingSender:
     def __init__(self, ok: bool = True) -> None:
         self.sent: list[OutboundMessage] = []
@@ -128,6 +152,7 @@ def make_runner(
         tools=tools if tools is not None else builtin_tools(),
         instructions="be brief",
         sender=sender,
+        tz=TZ,
     )
 
 
@@ -487,7 +512,7 @@ async def test_inject_lands_before_next_request(store: AsyncSessionStore) -> Non
     assert injected == [True]
     assert result.status == "completed"
     second = provider.requests[1].input
-    assert second[-1] == user_message("extra")
+    assert unstamped(second)[-1] == user_message("extra")
     assert_paired(second)
 
 
@@ -513,7 +538,7 @@ async def test_inject_after_text_only_response_is_not_dropped(store: AsyncSessio
 
     assert result.status == "completed"
     assert len(provider.requests) == 2
-    assert provider.requests[1].input[-1] == user_message("late")
+    assert unstamped(provider.requests[1].input)[-1] == user_message("late")
 
 
 async def test_tool_called_flag_and_running_state(store: AsyncSessionStore) -> None:
@@ -575,7 +600,7 @@ async def test_system_event_turn_is_stored_as_system_event(store: AsyncSessionSt
     assert result.status == "completed"
     kinds = [i.kind for i in await rows(store)]
     assert kinds == ["system_event", "assistant"]
-    assert provider.requests[0].input == [user_message("[report] done")]
+    assert unstamped(provider.requests[0].input) == [user_message("[report] done")]
 
 
 async def test_history_rebuilds_after_reopen_with_compaction(tmp_path: Path) -> None:
@@ -593,7 +618,7 @@ async def test_history_rebuilds_after_reopen_with_compaction(tmp_path: Path) -> 
     await runner2.run_turn(turn("second"))
     await store2.close()
 
-    assert provider2.requests[0].input == [
+    assert unstamped(provider2.requests[0].input) == [
         user_message(COMPACTION_PREFIX + "earlier talk"),
         user_message("second"),
     ]
@@ -614,7 +639,7 @@ async def test_history_rebuild_keeps_full_pairing_after_reopen(tmp_path: Path) -
     await store2.close()
 
     second_input = provider2.requests[0].input
-    assert second_input[0] == user_message("first")
+    assert unstamped(second_input)[0] == user_message("first")
     assert second_input[1] == {
         "type": "function_call",
         "call_id": "c1",
@@ -627,7 +652,7 @@ async def test_history_rebuild_keeps_full_pairing_after_reopen(tmp_path: Path) -
         "role": "assistant",
         "content": [{"type": "output_text", "text": "done"}],
     }
-    assert second_input[4] == user_message("second")
+    assert unstamped(second_input)[4] == user_message("second")
     assert_paired(second_input)
 
 
@@ -742,8 +767,8 @@ async def test_interrupted_turn_restarts_with_only_new_items(store: AsyncSession
 
     assert result.status == "completed"
     sent_input = provider.requests[1].input
-    assert sent_input.count(user_message("first")) == 1
-    assert sent_input.count(user_message("second")) == 1
+    assert unstamped(sent_input).count(user_message("first")) == 1
+    assert unstamped(sent_input).count(user_message("second")) == 1
     stored = [
         (i.payload["message_id"], i.payload["item"]) for i in await rows(store) if i.kind == "user"
     ]
@@ -816,6 +841,7 @@ async def test_on_response_observer_reports_usage_per_response(store: AsyncSessi
         instructions="be brief",
         sender=RecordingSender(),
         on_response=lambda sid, usage, _seq: seen.append((sid, usage)),
+        tz=TZ,
     )
 
     await runner.run_turn(turn("hi"))
@@ -838,6 +864,7 @@ async def test_async_instructions_resolve_per_session(store: AsyncSessionStore) 
         tools=builtin_tools(),
         instructions=instructions,
         sender=RecordingSender(),
+        tz=TZ,
     )
 
     await runner.run_turn(turn("hi"))
@@ -859,6 +886,7 @@ def notice_runner(
         instructions="be brief",
         sender=sender,
         failure_notice=NOTICE,
+        tz=TZ,
     )
 
 
@@ -924,3 +952,34 @@ async def test_no_notice_when_a_reply_was_already_sent(store: AsyncSessionStore)
 
     assert result.status == "failed" and result.replies_sent == 1
     assert [m.segments[0].data["text"] for m in sender.sent] == ["pong"]
+
+
+async def test_model_sees_stamps_on_user_message_and_reply_output_but_rows_stay_clean(
+    store: AsyncSessionStore,
+) -> None:
+    provider = ScriptedProvider(
+        calls_resp(("c1", "reply", {"text": "pong"})), text_resp("done"), text_resp("again")
+    )
+    runner = make_runner(store, provider, RecordingSender())
+
+    await runner.run_turn(turn("ping"))
+
+    stored = await rows(store)
+    user_row = next(i for i in stored if i.kind == "user")
+    result_row = next(i for i in stored if i.kind == "tool_result")
+    second = provider.requests[1].input
+    assert second[0]["content"] == [
+        {"type": "input_text", "text": f"{format_stamp(user_row.ts, TZ)} "},
+        {"type": "input_text", "text": "ping"},
+    ]
+    assert output_of(second, "c1") == f"{format_stamp(result_row.ts, TZ)} sent via qq:10001"
+    assert_paired(second)
+    # stamps are render-time only
+    assert result_row.payload["output"] == "sent via qq:10001"
+    assert user_row.payload["item"] == user_message("ping")
+
+    await runner.run_turn(turn("next"))
+
+    # the history prefix is byte-identical on the next request (prompt-cache friendly)
+    assert provider.requests[2].input[: len(second)] == second
+    assert provider.requests[2].input[-1]["content"][1]["text"] == "next"

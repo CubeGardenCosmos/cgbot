@@ -15,6 +15,8 @@ DEFAULT_BUFFER_CAPACITY = 30
 class BufferedMessage:
     message_id: str
     user_id: str
+    # Epoch seconds of the message; the proactive turn renders it as the line's own timestamp
+    # (``cgbot.timefmt.format_stamp``), the only record of when the message was sent.
     ts: float
     text: str
     # Source URLs of the message's images; fetched only if a proactive turn picks them up.

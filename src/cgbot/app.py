@@ -53,6 +53,7 @@ from cgbot.scheduler import KIND_COMPACTION_IDLE, Scheduler, SystemEvent
 from cgbot.search import SearchService, search_tools
 from cgbot.search.gemini import GeminiSearchClient
 from cgbot.session import AsyncSessionStore
+from cgbot.timefmt import time_instruction
 from cgbot.vision import build_vision, segment_image_urls
 from cgbot.vision.fetch import Fetch, default_fetch
 from cgbot.voice import (
@@ -290,6 +291,8 @@ class App:
             on_input_status=self.handle_input_status,
         )
         tiers = config.provider.reasoning
+        # One zone for gate hours, log stamps and every timestamp the model sees.
+        self._tz = ZoneInfo(config.group.timezone)
         self._voice: _Voice | None = (
             _build_voice(config.voice) if config.voice is not None else None
         )
@@ -299,6 +302,7 @@ class App:
             self._scheduler,
             tiers,
             is_busy=self._is_busy,
+            tz=self._tz,
         )
         self._coding: CodingStack | None = (
             CodingStack(
@@ -350,6 +354,7 @@ class App:
             images=self._vision.store if self._vision is not None else None,
             recent_image_turns=self._vision.recent_image_turns if self._vision is not None else 0,
             failure_notice=MODEL_FAILURE_NOTICE,
+            tz=self._tz,
         )
         self._dispatcher = PrivateDispatcher(
             self._runner, timebase, on_turn_done=self._on_turn_done
@@ -382,6 +387,7 @@ class App:
             chat_reasoning_effort=effort_for("group", tiers),
             summary_reasoning_effort=effort_for("summary", tiers),
             vision=self._vision,
+            tz=self._tz,
         )
         self._tasks: set[asyncio.Task[object]] = set()
         self._sweep_task: asyncio.Task[None] | None = None
@@ -566,7 +572,7 @@ class App:
                 store=self._group_state,
                 clock=time.time,
                 rng=random.Random(),
-                tz=ZoneInfo(self._config.group.timezone),
+                tz=self._tz,
             )
         return self._gate
 
@@ -698,7 +704,9 @@ class App:
         instructions prefix and the provider's prompt cache stays valid. A memory saved during the
         window is already in history as its tool call and is searchable via the memory tools.
         """
-        prompt = SYSTEM_PROMPT if self._coding is None else f"{SYSTEM_PROMPT}\n\n{CODING_PROMPT}"
+        prompt = f"{SYSTEM_PROMPT}\n\n{time_instruction(self._tz)}"
+        if self._coding is not None:
+            prompt += f"\n\n{CODING_PROMPT}"
         block = self._memory_blocks.get(session_id)
         if block is None:
             user_id = session_id.removeprefix(PRIVATE_SESSION_PREFIX)

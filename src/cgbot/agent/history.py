@@ -18,16 +18,24 @@ Row layout written by ``AgentRunner`` (``payload`` keys):
 Pairing: a ``function_call`` is emitted only with a matching ``function_call_output``
 (synthesised by the runner for unanswered calls), and an output is emitted only if its call is
 in the active window. The first output per ``call_id`` wins.
+
+Timestamps (``cgbot.timefmt``) are added at render time from each row's stored ``ts`` and are
+never stored: a ``user`` / ``system_event`` message gets a leading ``input_text`` part, and the
+output of a successful ``reply`` call (the bot's sent message) is prefixed. Assistant text,
+other tool results, errors and the compaction summary stay untouched.
 """
 
 from __future__ import annotations
 
 import copy
 from collections.abc import Mapping, Sequence
+from datetime import tzinfo
 from typing import Any, cast
 
+from cgbot.agent.reply import REPLY_TOOL_NAME
 from cgbot.provider import function_call_output, user_message
 from cgbot.session import Item, Kind
+from cgbot.timefmt import format_stamp
 from cgbot.vision.intake import IMAGE_REF_PART, item_image_refs
 
 COMPACTION_PREFIX = "以下是此前对话的压缩摘要,供延续上下文:\n"
@@ -67,13 +75,14 @@ def expand_window(items: Sequence[Item]) -> list[Item]:
 
 
 def to_input_items(
-    items: Sequence[Item], images: Mapping[str, str] | None = None
+    items: Sequence[Item], images: Mapping[str, str] | None = None, *, tz: tzinfo
 ) -> list[dict[str, Any]]:
     """Convert an active window (``load_active`` order) into Responses input items.
 
-    ``images`` maps image refs to data URLs (see ``recent_image_refs``).
+    ``images`` maps image refs to data URLs (see ``recent_image_refs``); ``tz`` is the zone of
+    the rendered timestamps.
     """
-    return render_items(expand_window(items), images)
+    return render_items(expand_window(items), images, tz=tz)
 
 
 def recent_image_refs(expanded: Sequence[Item], turns: int) -> list[str]:
@@ -109,13 +118,27 @@ def _with_images(item: dict[str, Any], images: Mapping[str, str]) -> dict[str, A
     return {**item, "content": parts}
 
 
+def _stamped(item: dict[str, Any], stamp: str) -> dict[str, Any]:
+    """A message item with ``stamp`` leading its text; other item types are returned as is."""
+    if item.get("type") != "message":
+        return item
+    content = item.get("content")
+    if isinstance(content, list):
+        # The trailing space keeps the stamp apart when a provider joins text parts.
+        return {**item, "content": [{"type": "input_text", "text": f"{stamp} "}, *content]}
+    if isinstance(content, str):
+        return {**item, "content": f"{stamp} {content}"}
+    return item
+
+
 def render_items(
-    expanded: Sequence[Item], images: Mapping[str, str] | None = None
+    expanded: Sequence[Item], images: Mapping[str, str] | None = None, *, tz: tzinfo
 ) -> list[dict[str, Any]]:
     """Render an already expanded window (see ``expand_window``) into input items.
 
     Stored ``cgbot_image`` parts become ``input_image`` parts for refs present in ``images`` and
-    are dropped otherwise, so no ref ever leaves the process.
+    are dropped otherwise, so no ref ever leaves the process. User/system messages and sent
+    ``reply`` outputs carry the time of their row in ``tz``; the result depends only on the rows.
     """
     resolved = images or {}
     called = {str(i.payload["call_id"]) for i in expanded if i.kind == "tool_call"}
@@ -128,14 +151,17 @@ def render_items(
         elif item.kind in _ITEM_KINDS:
             if "item" in payload:
                 rendered = copy.deepcopy(dict(payload["item"]))
-                out.append(
-                    _with_images(rendered, resolved) if item.kind in _IMAGE_KINDS else rendered
-                )
+                if item.kind in _IMAGE_KINDS:
+                    rendered = _stamped(_with_images(rendered, resolved), format_stamp(item.ts, tz))
+                out.append(rendered)
         elif item.kind == "tool_result":
             call_id = str(payload["call_id"])
             if call_id in called and call_id not in answered:
                 answered.add(call_id)
-                out.append(function_call_output(call_id, str(payload["output"])))
+                output = str(payload["output"])
+                if payload.get("name") == REPLY_TOOL_NAME and not payload.get("is_error"):
+                    output = f"{format_stamp(item.ts, tz)} {output}"
+                out.append(function_call_output(call_id, output))
     return out
 
 

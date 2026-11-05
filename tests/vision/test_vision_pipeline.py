@@ -169,9 +169,10 @@ async def test_private_image_segment_reaches_the_request_as_input_image(tmp_path
     await settle(app, clock)
 
     item = provider.requests[0].input[0]
-    assert item["content"][0] == {"type": "input_text", "text": "看这个[图片]"}
-    assert item["content"][1]["type"] == "input_image"
-    assert item["content"][1]["image_url"].startswith("data:image/jpeg;base64,")
+    assert item["content"][0]["text"].startswith("[") and item["content"][0]["text"].endswith("] ")
+    assert item["content"][1] == {"type": "input_text", "text": "看这个[图片]"}
+    assert item["content"][2]["type"] == "input_image"
+    assert item["content"][2]["image_url"].startswith("data:image/jpeg;base64,")
     assert "cgbot_image" not in json.dumps(provider.requests[0].input)
     await app.stop()
 
@@ -182,7 +183,7 @@ async def test_private_fetch_failure_keeps_the_marker_and_the_turn_runs(tmp_path
     await app.handle_message(private_image_msg("m1", "看这个", PRIVATE_URL))
     await settle(app, clock)
 
-    assert provider.requests[0].input[0]["content"] == [
+    assert provider.requests[0].input[0]["content"][1:] == [
         {"type": "input_text", "text": "看这个[图片]"}
     ]
     await app.stop()
@@ -196,7 +197,7 @@ async def test_disabled_vision_never_fetches_and_keeps_text_only(tmp_path: Path)
     await settle(app, clock)
 
     assert fetch.calls == []
-    assert provider.requests[0].input[0]["content"] == [
+    assert provider.requests[0].input[0]["content"][1:] == [
         {"type": "input_text", "text": "看这个[图片]"}
     ]
     await app.stop()
@@ -213,7 +214,7 @@ async def test_group_wake_attaches_the_image_and_private_requests_never_see_it(
     )
     group_request = provider.requests[-1]
     assert len(image_urls_of(group_request)) == 1
-    assert group_request.input[-1]["content"][0]["text"] == "[成员 777] 群友发图[图片]"
+    assert group_request.input[-1]["content"][1]["text"] == "[成员 777] 群友发图[图片]"
 
     await app.handle_message(private_image_msg("m1", "私聊文字"))  # text only, no image
     await settle(app, clock)
@@ -235,7 +236,7 @@ async def test_only_the_recent_image_turns_are_sent_in_private(tmp_path: Path) -
 
     last = provider.requests[-1]
     texts_with_images = [
-        (item["content"][0]["text"], sum(1 for p in item["content"] if p["type"] == "input_image"))
+        (item["content"][1]["text"], sum(1 for p in item["content"] if p["type"] == "input_image"))
         for item in last.input
         if item.get("role") == "user"
     ]

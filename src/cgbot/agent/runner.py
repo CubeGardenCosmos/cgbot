@@ -27,6 +27,7 @@ import copy
 import logging
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
+from datetime import tzinfo
 from typing import Any, Literal, Protocol
 
 from cgbot.agent.history import (
@@ -127,9 +128,12 @@ class AgentRunner:
         images: ImageSource | None = None,
         recent_image_turns: int = 0,
         failure_notice: str | None = None,
+        *,
+        tz: tzinfo,
     ) -> None:
         self._provider = provider
         self._store = store
+        self._tz = tz
         self._tools = tools
         self._instructions = instructions
         self._sender = sender
@@ -250,7 +254,7 @@ class AgentRunner:
                     images = await self._images.load(ctx.session_id, refs)
             request = ModelRequest(
                 instructions=instructions,
-                input=render_items(expanded, images),
+                input=render_items(expanded, images, tz=self._tz),
                 tools=self._tools.schemas(channels),
                 reasoning_effort=self._reasoning_effort,
             )

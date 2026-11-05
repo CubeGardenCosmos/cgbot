@@ -4,7 +4,7 @@ import asyncio
 from collections.abc import Iterator
 from typing import Any
 
-from compaction_fakes import SID, FakeProvider, Rows
+from compaction_fakes import SID, TZ, FakeProvider, Rows
 
 from cgbot.agent.history import COMPACTION_PREFIX, to_input_items
 from cgbot.compaction import Compactor, estimate_tokens
@@ -30,6 +30,7 @@ def _compactor(
         None,
         tiers or ReasoningTiers(),
         is_busy=lambda _sid: busy,
+        tz=TZ,
         reserved_tokens=reserved_tokens,
     )
 
@@ -79,7 +80,7 @@ async def test_threshold_boundary_is_exactly_half_the_window(
         rows = Rows(store, sid)
         for i in range(4):
             await rows.exchange(f"{PAD}问{i}", f"{PAD}答{i}")
-    tokens = estimate_tokens(to_input_items(await store.load_active(SID)))
+    tokens = estimate_tokens(to_input_items(await store.load_active(SID), tz=TZ))
 
     at_half = provider_cls(context_window=2 * tokens)
     out = await _compactor(at_half, store).maybe_compact(SID)
@@ -128,7 +129,7 @@ async def test_rows_after_the_usage_mark_are_estimated_on_top(
     await rows.user(PAD)
     window = await store.load_active(SID)
     newer = [item for item in window if item.seq > seqs["a4"]]
-    expected = 100 + estimate_tokens(to_input_items(newer))
+    expected = 100 + estimate_tokens(to_input_items(newer, tz=TZ))
 
     compactor = _compactor(provider_cls(context_window=10_000_000), store)
     compactor.record_usage(SID, Usage(input_tokens=100), through_seq=seqs["a4"])
@@ -162,7 +163,7 @@ async def test_compact_summarises_the_head_and_keeps_the_tail_verbatim(
 
     window = await store.load_active(SID)
     assert window[0].kind == "compaction" and window[0].seq == compaction_seq
-    items = to_input_items(window)
+    items = to_input_items(window, tz=TZ)
     assert items[0]["role"] == "user"
     assert items[0]["content"][0]["text"].startswith(COMPACTION_PREFIX + "摘要正文")
     assert "第二轮问" in _texts(items) and "第四轮答" in _texts(items)
@@ -279,6 +280,7 @@ async def test_turn_starting_during_summary_blocks_the_commit(
         None,
         ReasoningTiers(),
         is_busy=lambda _sid: next(answers),
+        tz=TZ,
     )
     out = await compactor.compact(SID)
     assert out.status == "busy"

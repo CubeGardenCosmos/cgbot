@@ -5,6 +5,7 @@ import json
 from collections.abc import AsyncIterator, Iterator
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -31,11 +32,13 @@ from cgbot.provider import (
     Usage,
 )
 from cgbot.session import AsyncSessionStore
+from cgbot.timefmt import format_stamp
 
 GID = "5001"
 SID = f"group:{GID}"
 T0 = 1_000_000.0
 LIMITS = SkillLimits(topics=5, memes=5, rules=5, members=3, habits_per_member=3)
+TZ = ZoneInfo("Asia/Kuala_Lumpur")
 
 
 class Clock:
@@ -201,6 +204,7 @@ def make_manager(
         chat_reasoning_effort="low",
         summary_reasoning_effort="low",
         clock=clock,
+        tz=TZ,
     )
 
 
@@ -619,3 +623,62 @@ async def test_group_session_exposes_meme_lookup_and_stores_summary_memes(
     assert "meme_lookup" in names
     assert await memes.lookup("大肥鱼", group_id=GID) == (MemeEntry("大肥鱼", "群吉祥物"),)
     assert await memes.lookup("躺平", group_id=GID) == (MemeEntry("躺平", ""),)
+
+
+async def test_group_render_stamps_member_message_and_bot_reply(
+    sessions: AsyncSessionStore, skills: GroupSkillStore, memes: MemeStore
+) -> None:
+    provider = FakeProvider(chat=[calls_resp(("c1", "reply", {"text": "嗯"})), text_resp("done")])
+    mgr = make_manager(
+        sessions, skills, provider, memes=memes, sender=RecordingSender(), clock=Clock()
+    )
+
+    await mgr.handle(gmsg("m1", "u1", "大肥鱼 在吗"), "wake")
+
+    rows = await sessions.load(SID)
+    user_ts = next(i.ts for i in rows if i.kind == "user")
+    reply_ts = next(i.ts for i in rows if i.kind == "tool_result")
+    rendered = provider.chat_requests[1].input
+    user = next(i for i in rendered if i.get("role") == "user")
+    assert user["content"][0] == {"type": "input_text", "text": f"{format_stamp(user_ts, TZ)} "}
+    assert user["content"][1]["text"] == "[成员 u1] 大肥鱼 在吗"
+    output = next(i for i in rendered if i["type"] == "function_call_output")
+    assert output["call_id"] == "c1"
+    assert output["output"] == f"{format_stamp(reply_ts, TZ)} sent"
+    assert [i["type"] for i in rendered if i["type"].startswith("function_call")] == [
+        "function_call",
+        "function_call_output",
+    ]
+
+
+async def test_group_instructions_explain_the_timestamps(
+    sessions: AsyncSessionStore, skills: GroupSkillStore, memes: MemeStore
+) -> None:
+    provider = FakeProvider(chat=[text_resp("ok")])
+    mgr = make_manager(
+        sessions, skills, provider, memes=memes, sender=RecordingSender(), clock=Clock()
+    )
+
+    await mgr.handle(gmsg("m1", "u1", "大肥鱼 hi"), "wake")
+
+    assert "方括号时间" in provider.chat_requests[0].instructions
+    assert "Asia/Kuala_Lumpur" in provider.chat_requests[0].instructions
+
+
+async def test_proactive_buffered_lines_carry_their_own_times(
+    sessions: AsyncSessionStore, skills: GroupSkillStore, memes: MemeStore
+) -> None:
+    provider = FakeProvider(chat=[text_resp("no reply")])
+    mgr = make_manager(
+        sessions, skills, provider, memes=memes, sender=RecordingSender(), clock=Clock()
+    )
+    buffered = (
+        BufferedMessage("b1", "u2", T0, "今天吃啥"),
+        BufferedMessage("b2", "u3", T0 + 3600, "火锅"),
+    )
+
+    await mgr.handle(gmsg("m9", "u9", "无关"), "proactive", buffered=buffered)
+
+    text = json.dumps(provider.chat_requests[-1].input, ensure_ascii=False)
+    assert f"{format_stamp(T0, TZ)} [成员 u2] 今天吃啥" in text
+    assert f"{format_stamp(T0 + 3600, TZ)} [成员 u3] 火锅" in text

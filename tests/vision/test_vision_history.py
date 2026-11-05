@@ -6,6 +6,7 @@ import json
 from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import pytest
 from vision_fakes import MapFetch, jpeg_bytes
@@ -15,9 +16,11 @@ from cgbot.agent.history import expand_window, recent_image_refs, render_items, 
 from cgbot.model import Channel, OutboundMessage, SendResult
 from cgbot.provider import ModelRequest, ModelResponse, TextOutput, Usage
 from cgbot.session import AsyncSessionStore, Item
+from cgbot.timefmt import format_stamp
 from cgbot.vision import ImageIntake, ImageStore, message_with_images
 
 URL = "https://img.example/{}.jpg"
+TZ = ZoneInfo("Asia/Kuala_Lumpur")
 
 
 def _rows(*texts_and_refs: tuple[str, list[str]]) -> list[Item]:
@@ -52,20 +55,24 @@ def test_only_the_newest_image_turns_are_expanded_older_ones_keep_the_marker() -
     assert recent_image_refs(window, 0) == []
 
     urls = {ref: f"data:image/jpeg;base64,{ref}" for ref in recent_image_refs(window, 2)}
-    items = render_items(window, urls)
+    items = render_items(window, urls, tz=TZ)
     assert _image_parts(items) == [
         [],
         [],
         ["data:image/jpeg;base64,r2.jpg", "data:image/jpeg;base64,r3.jpg"],
         ["data:image/jpeg;base64,r4.jpg"],
     ]
-    assert items[0]["content"][0]["text"] == "a[图片]"  # the degraded turn still says "[图片]"
+    # the degraded turn still says "[图片]"; part 0 is the timestamp
+    assert items[0]["content"][1]["text"] == "a[图片]"
     assert "cgbot_image" not in json.dumps(items)
 
 
 def test_unresolved_refs_are_dropped_not_leaked() -> None:
-    items = to_input_items(_rows(("x[图片]", ["gone.jpg"])), {})
-    assert items[0]["content"] == [{"type": "input_text", "text": "x[图片]"}]
+    items = to_input_items(_rows(("x[图片]", ["gone.jpg"])), {}, tz=TZ)
+    assert items[0]["content"] == [
+        {"type": "input_text", "text": f"{format_stamp(0.0, TZ)} "},
+        {"type": "input_text", "text": "x[图片]"},
+    ]
 
 
 # ---- through the runner ----------------------------------------------------------------------
@@ -129,7 +136,7 @@ async def test_request_carries_input_image_for_recent_turns_only(
     )
     provider = Provider()
     runner = AgentRunner(
-        provider, store, builtin_tools(), "sys", _send, images=images, recent_image_turns=3
+        provider, store, builtin_tools(), "sys", _send, images=images, recent_image_turns=3, tz=TZ
     )
 
     for n, url in enumerate(urls):
@@ -140,7 +147,7 @@ async def test_request_carries_input_image_for_recent_turns_only(
     per_turn = _image_parts(last)
     assert [len(p) for p in per_turn] == [0, 0, 1, 1, 1]  # newest three expanded
     assert all(u.startswith("data:image/jpeg;base64,") for p in per_turn for u in p)
-    assert [i["content"][0]["text"] for i in last] == [f"图{n}[图片]" for n in range(5)]
+    assert [i["content"][1]["text"] for i in last] == [f"图{n}[图片]" for n in range(5)]
     # the first request of the run saw exactly one image (its own turn)
     assert [len(p) for p in _image_parts(provider.requests[0].input)] == [1]
 
@@ -152,7 +159,7 @@ async def test_group_images_never_appear_in_a_private_request(
     group_ref = await images.save("group:5001", jpeg_bytes(), "jpg")
     provider = Provider()
     runner = AgentRunner(
-        provider, store, builtin_tools(), "sys", _send, images=images, recent_image_turns=3
+        provider, store, builtin_tools(), "sys", _send, images=images, recent_image_turns=3, tz=TZ
     )
 
     # A private history item that (wrongly or maliciously) names a group-owned ref.
@@ -167,6 +174,8 @@ async def test_without_a_vision_source_refs_are_dropped(
     tmp_path: Path, store: AsyncSessionStore
 ) -> None:
     provider = Provider()
-    runner = AgentRunner(provider, store, builtin_tools(), "sys", _send)
+    runner = AgentRunner(provider, store, builtin_tools(), "sys", _send, tz=TZ)
     await runner.run_turn(_turn("private:u1", message_with_images("x[图片]", ["r.jpg"]), 1))
-    assert provider.requests[0].input[0]["content"] == [{"type": "input_text", "text": "x[图片]"}]
+    stamp, text = provider.requests[0].input[0]["content"]
+    assert stamp["text"].startswith("[") and stamp["text"].endswith("] ")
+    assert text == {"type": "input_text", "text": "x[图片]"}
