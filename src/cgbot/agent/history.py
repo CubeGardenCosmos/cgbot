@@ -1,5 +1,9 @@
 """Session rows -> Responses input items (R1.6).
 
+Image refs: a stored ``user`` / ``system_event`` item may hold ``cgbot_image`` parts (see
+``cgbot.vision``). Rendering swaps them for ``input_image`` parts when the ref has a loaded data
+URL (the newest image-bearing turns, ``recent_image_refs``) and drops them otherwise.
+
 Row layout written by ``AgentRunner`` (``payload`` keys):
 - ``user`` / ``system_event``: ``item`` = the input item sent with the turn. ``system_event``
   rows without ``item`` are observations (e.g. model failures) and are not model input.
@@ -19,11 +23,12 @@ in the active window. The first output per ``call_id`` wins.
 from __future__ import annotations
 
 import copy
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import Any, cast
 
 from cgbot.provider import function_call_output, user_message
 from cgbot.session import Item, Kind
+from cgbot.vision.intake import IMAGE_REF_PART, item_image_refs
 
 COMPACTION_PREFIX = "以下是此前对话的压缩摘要,供延续上下文:\n"
 CANCELLED_OUTPUT = (
@@ -34,6 +39,7 @@ INTERRUPTED_OUTPUT = (
 )
 
 _ITEM_KINDS = frozenset({"user", "system_event", "assistant", "tool_call"})
+_IMAGE_KINDS = frozenset({"user", "system_event"})
 
 
 def expand_window(items: Sequence[Item]) -> list[Item]:
@@ -60,13 +66,58 @@ def expand_window(items: Sequence[Item]) -> list[Item]:
     return out
 
 
-def to_input_items(items: Sequence[Item]) -> list[dict[str, Any]]:
-    """Convert an active window (``load_active`` order) into Responses input items."""
-    return render_items(expand_window(items))
+def to_input_items(
+    items: Sequence[Item], images: Mapping[str, str] | None = None
+) -> list[dict[str, Any]]:
+    """Convert an active window (``load_active`` order) into Responses input items.
+
+    ``images`` maps image refs to data URLs (see ``recent_image_refs``).
+    """
+    return render_items(expand_window(items), images)
 
 
-def render_items(expanded: Sequence[Item]) -> list[dict[str, Any]]:
-    """Render an already expanded window (see ``expand_window``) into input items."""
+def recent_image_refs(expanded: Sequence[Item], turns: int) -> list[str]:
+    """Refs of the images in the last ``turns`` image-bearing user turns of a window.
+
+    Only these are worth loading and sending; every older image degrades to the text marker the
+    turn already carries.
+    """
+    if turns <= 0:
+        return []
+    per_turn = [
+        refs
+        for item in expanded
+        if item.kind in _IMAGE_KINDS and "item" in item.payload
+        if (refs := item_image_refs(item.payload["item"]))
+    ]
+    return [ref for refs in per_turn[-turns:] for ref in refs]
+
+
+def _with_images(item: dict[str, Any], images: Mapping[str, str]) -> dict[str, Any]:
+    """Replace ``cgbot_image`` parts by ``input_image`` parts; unresolved ones are dropped."""
+    content = item.get("content")
+    if not isinstance(content, list):
+        return item
+    parts: list[Any] = []
+    for part in content:
+        if isinstance(part, dict) and part.get("type") == IMAGE_REF_PART:
+            url = images.get(str(part.get("ref")))
+            if url is not None:
+                parts.append({"type": "input_image", "image_url": url})
+        else:
+            parts.append(part)
+    return {**item, "content": parts}
+
+
+def render_items(
+    expanded: Sequence[Item], images: Mapping[str, str] | None = None
+) -> list[dict[str, Any]]:
+    """Render an already expanded window (see ``expand_window``) into input items.
+
+    Stored ``cgbot_image`` parts become ``input_image`` parts for refs present in ``images`` and
+    are dropped otherwise, so no ref ever leaves the process.
+    """
+    resolved = images or {}
     called = {str(i.payload["call_id"]) for i in expanded if i.kind == "tool_call"}
     answered: set[str] = set()
     out: list[dict[str, Any]] = []
@@ -76,7 +127,10 @@ def render_items(expanded: Sequence[Item]) -> list[dict[str, Any]]:
             out.append(user_message(COMPACTION_PREFIX + str(payload["summary"])))
         elif item.kind in _ITEM_KINDS:
             if "item" in payload:
-                out.append(copy.deepcopy(dict(payload["item"])))
+                rendered = copy.deepcopy(dict(payload["item"]))
+                out.append(
+                    _with_images(rendered, resolved) if item.kind in _IMAGE_KINDS else rendered
+                )
         elif item.kind == "tool_result":
             call_id = str(payload["call_id"])
             if call_id in called and call_id not in answered:

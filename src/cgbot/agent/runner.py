@@ -14,6 +14,10 @@ Cancellation and injection (for R2.1/R2.2 steering):
   they are appended before the next model request of the running turn (after the tool results
   that precede them). If the model answers without a tool call while items are queued, the loop
   continues so they are not dropped.
+
+Images: when an ``images`` source is given, the data URLs of the images in the newest
+``recent_image_turns`` image-bearing user turns are loaded (scoped by the session id) before each
+request and rendered as ``input_image`` parts; older images stay as the text marker.
 """
 
 from __future__ import annotations
@@ -23,12 +27,14 @@ import copy
 import logging
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
-from typing import Any, Literal
+from typing import Any, Literal, Protocol
 
 from cgbot.agent.history import (
     CANCELLED_OUTPUT,
     INTERRUPTED_OUTPUT,
-    to_input_items,
+    expand_window,
+    recent_image_refs,
+    render_items,
     unanswered_calls,
 )
 from cgbot.agent.tools import (
@@ -56,6 +62,12 @@ Sender = Callable[[OutboundMessage], Awaitable[SendResult]]
 TurnStatus = Literal["completed", "cancelled", "failed"]
 ResponseObserver = Callable[[str, Usage, int], None]
 InstructionsSource = str | Callable[[str], Awaitable[str]]
+
+
+class ImageSource(Protocol):
+    """Loads stored chat images of one session as ``ref -> data URL`` (missing refs omitted)."""
+
+    async def load(self, session_id: str, refs: Sequence[str]) -> dict[str, str]: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -111,6 +123,8 @@ class AgentRunner:
         sender: Sender,
         reasoning_effort: str | None = None,
         on_response: ResponseObserver | None = None,
+        images: ImageSource | None = None,
+        recent_image_turns: int = 0,
     ) -> None:
         self._provider = provider
         self._store = store
@@ -119,6 +133,8 @@ class AgentRunner:
         self._sender = sender
         self._reasoning_effort = reasoning_effort
         self._on_response = on_response
+        self._images = images
+        self._recent_image_turns = recent_image_turns
         self._turns: dict[str, _Turn] = {}
 
     async def run_turn(self, ctx: TurnContext) -> TurnResult:
@@ -223,9 +239,15 @@ class AgentRunner:
                 if isinstance(self._instructions, str)
                 else await self._instructions(ctx.session_id)
             )
+            expanded = expand_window(items)
+            images: dict[str, str] = {}
+            if self._images is not None:
+                refs = recent_image_refs(expanded, self._recent_image_turns)
+                if refs:
+                    images = await self._images.load(ctx.session_id, refs)
             request = ModelRequest(
                 instructions=instructions,
-                input=to_input_items(items),
+                input=render_items(expanded, images),
                 tools=self._tools.schemas(channels),
                 reasoning_effort=self._reasoning_effort,
             )

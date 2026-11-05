@@ -245,7 +245,7 @@ async def test_empty_instructions_and_unknown_items_are_skipped() -> None:
                     "type": "message",
                     "role": "user",
                     "content": [
-                        {"type": "input_image", "image_url": "x"},
+                        {"type": "input_file", "file_id": "f1"},
                         {"type": "input_text", "text": "看图"},
                     ],
                 },
@@ -256,6 +256,44 @@ async def test_empty_instructions_and_unknown_items_are_skipped() -> None:
     assert sent_body(seen)["messages"] == [
         {"role": "system", "content": "规则"},
         {"role": "user", "content": "看图"},
+    ]
+
+
+async def test_user_input_image_parts_become_image_url_parts_in_order() -> None:
+    seen: list[httpx.Request] = []
+    provider = make_provider(json_handler(TEXT_RESPONSE, seen=seen))
+    data_url = "data:image/jpeg;base64,AAAA"
+
+    await provider.respond(
+        request_of(
+            instructions="",
+            input=[
+                {
+                    "type": "message",
+                    "role": "user",
+                    "content": [
+                        {"type": "input_text", "text": "看图[图片]"},
+                        {"type": "input_image", "image_url": data_url},
+                        {"type": "input_image", "image_url": ""},
+                    ],
+                },
+                {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [{"type": "input_image", "image_url": data_url}],
+                },
+            ],
+        )
+    )
+
+    assert sent_body(seen)["messages"] == [
+        {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "看图[图片]"},
+                {"type": "image_url", "image_url": {"url": data_url}},
+            ],
+        }
     ]
 
 

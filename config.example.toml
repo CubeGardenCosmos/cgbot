@@ -39,6 +39,15 @@ private = "high"     # 日常私聊
 planning = "max"     # 任务规划(设计待定)
 group = "low"        # 群聊轮次
 
+[provider.vision]
+# 聊天图片多模态:入站图片作为 input_image 随该条用户消息发给模型(上游模型须支持图片输入)。
+enabled = false                  # 默认关闭;文字里仍保留 [图片] 标记
+max_images_per_turn = 4          # 单条消息最多取几张
+recent_image_turns = 3           # 仅最近 N 个带图用户轮次发真实图片,更早的退化为 [图片] 文字
+max_edge = 1536                  # 长边上限(像素);超出缩小后重编码(有透明为 PNG,否则 JPEG)
+retention_images = 200           # 每个私聊/群范围最多保留的图片数(超出删最旧)
+retention_days = 30              # 图片保留天数
+
 [storage]
 data_dir = "data"    # 相对本配置文件所在目录;运行时数据,不入库
 # 每个域一个独立的 SQLite 文件(第二十轮:不再共用单库):

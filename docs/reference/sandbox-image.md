@@ -45,7 +45,9 @@ docker build -t cgbot-sandbox:latest sandbox/
 
 ## 私聊图片收件箱
 
-启用 `[coding]` 时,私聊收到的 PNG/JPEG/WebP/GIF 图片会下载到该用户的 `/workspace/inbox/`,宿主路径为 `<coding.docker.host_data_dir>/users/<内部用户 ID>/inbox/`。文件名由服务器生成(`YYYYMMDD-HHMMSS-序号.扩展名`),单图上限 20 MiB,每用户只保留最近 50 张。用户消息会附加已保存的沙盒路径,Coding Agent 可将其用于图片参考或报告;群聊不下载,下载失败不影响原消息。仅允许公网 HTTP(S) 地址,不跟随重定向。
+启用 `[coding]` 时,私聊收到的 PNG/JPEG/WebP/GIF 图片会下载到该用户的 `/workspace/inbox/`,宿主路径为 `<coding.docker.host_data_dir>/users/<内部用户 ID>/inbox/`。文件名由服务器生成(`YYYYMMDD-HHMMSS-序号.扩展名`),单图上限 20 MiB,每用户只保留最近 50 张。用户消息会附加已保存的沙盒路径,Coding Agent 可将其用于图片参考或报告;群聊不下载,下载失败不影响原消息。仅允许公网 HTTP(S) 地址,不跟随重定向(下载实现与聊天多模态共用 `cgbot.vision.fetch`)。
+
+收件箱只服务 Coding Agent,与聊天多模态互不依赖:启用 `[provider.vision]` 时,同一张图片还会另行下载、缩放并作为 `input_image` 交给聊天模型,存放在 `<data_dir>/images/`,见 [chat-vision.md](chat-vision.md)。
 
 ## 内置 MCP 与技能
 

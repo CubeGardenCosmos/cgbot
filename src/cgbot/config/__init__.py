@@ -11,6 +11,9 @@ File format (see ``config.example.toml`` at the repo root for a commented copy):
   ``api_key_ref`` (required secret name);
   ``[provider.reasoning]`` tiers ``summary`` (low), ``private`` (high), ``planning`` (max),
   ``group`` (low), passed through to the upstream.
+  ``[provider.vision]`` (all optional): ``enabled`` (default false), ``max_images_per_turn`` (4),
+  ``recent_image_turns`` (3), ``max_edge`` (1536 px), ``retention_images`` (200 per scope),
+  ``retention_days`` (30); inbound chat images are sent to the model as ``input_image`` parts.
 - ``[storage]``: ``data_dir`` (default ``data``, relative to the config file's directory). It
   holds one SQLite file per domain: ``profile.sqlite`` (identity/channels), ``sessions.sqlite``
   (chat records), ``scheduler.sqlite``, and ``<module>.sqlite`` for later modules.
@@ -37,6 +40,7 @@ from cgbot.config.settings import (
     ScopeConfig,
     Secret,
     StoragePaths,
+    VisionConfig,
 )
 
 __all__ = [
@@ -53,5 +57,6 @@ __all__ = [
     "ScopeConfig",
     "Secret",
     "StoragePaths",
+    "VisionConfig",
     "load_config",
 ]

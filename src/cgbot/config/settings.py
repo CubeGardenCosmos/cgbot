@@ -90,6 +90,24 @@ class ReasoningTiers:
 
 
 @dataclass(frozen=True, slots=True)
+class VisionConfig:
+    """``[provider.vision]``: send inbound chat images to the (multimodal) model.
+
+    Off by default. Images are downscaled to ``max_edge`` and stored per scope; only the newest
+    ``recent_image_turns`` image-bearing user turns are sent as images, older ones stay as the
+    text marker. Stored images are kept at most ``retention_images`` per scope and
+    ``retention_days`` days.
+    """
+
+    enabled: bool = False
+    max_images_per_turn: int = 4
+    recent_image_turns: int = 3
+    max_edge: int = 1536
+    retention_images: int = 200
+    retention_days: int = 30
+
+
+@dataclass(frozen=True, slots=True)
 class ProviderConfig:
     """Single model provider; ``wire_api`` selects Responses or Chat Completions on the upstream."""
 
@@ -99,6 +117,7 @@ class ProviderConfig:
     api_key: Secret
     reasoning: ReasoningTiers
     wire_api: WireApi = "responses"  # wire format: Responses (default) or Chat Completions
+    vision: VisionConfig = field(default_factory=lambda: VisionConfig())
 
 
 @dataclass(frozen=True, slots=True)
@@ -144,6 +163,11 @@ class StoragePaths:
         if not name or name in {".", ".."} or any(c in name for c in "/\\:"):
             raise ValueError(f"invalid storage module name: {name!r}")
         return self.data_dir / f"{name}.sqlite"
+
+    @property
+    def images(self) -> Path:
+        """Directory of chat image blobs, one subdirectory per owning private/group scope."""
+        return self.data_dir / "images"
 
 
 @dataclass(frozen=True, slots=True)

@@ -25,6 +25,7 @@ from cgbot.config.settings import (
     SearchGeminiConfig,
     Secret,
     StoragePaths,
+    VisionConfig,
     WireApi,
 )
 from cgbot.voice.config import load_voice_config
@@ -141,6 +142,7 @@ def _provider(t: _Table, source: _SecretSource) -> ProviderConfig:
         group=tiers.text_or("group", defaults.group),
     )
     tiers.close()
+    vision = _vision(t.sub("vision"))
     t.close()
     return ProviderConfig(
         base_url=base_url,
@@ -149,7 +151,22 @@ def _provider(t: _Table, source: _SecretSource) -> ProviderConfig:
         api_key=api_key,
         reasoning=reasoning,
         wire_api=wire_api,
+        vision=vision,
     )
+
+
+def _vision(t: _Table) -> VisionConfig:
+    defaults = VisionConfig()
+    vision = VisionConfig(
+        enabled=t.bool_or("enabled", defaults.enabled),
+        max_images_per_turn=t.positive_int_or("max_images_per_turn", defaults.max_images_per_turn),
+        recent_image_turns=t.positive_int_or("recent_image_turns", defaults.recent_image_turns),
+        max_edge=t.positive_int_or("max_edge", defaults.max_edge),
+        retention_images=t.positive_int_or("retention_images", defaults.retention_images),
+        retention_days=t.positive_int_or("retention_days", defaults.retention_days),
+    )
+    t.close()
+    return vision
 
 
 def _group(t: _Table) -> GroupConfig:

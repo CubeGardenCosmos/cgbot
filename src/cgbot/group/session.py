@@ -47,6 +47,7 @@ from cgbot.provider import (
     user_message,
 )
 from cgbot.session import AsyncSessionStore
+from cgbot.vision import Vision, segment_image_urls
 
 log = logging.getLogger(__name__)
 
@@ -155,6 +156,7 @@ class GroupSessionManager:
         chat_reasoning_effort: str | None,
         summary_reasoning_effort: str | None,
         clock: Callable[[], float] = time.time,
+        vision: Vision | None = None,
     ) -> None:
         self._provider = provider
         self._sessions = sessions
@@ -167,6 +169,7 @@ class GroupSessionManager:
         self._chat_effort = chat_reasoning_effort
         self._summary_effort = summary_reasoning_effort
         self._clock = clock
+        self._vision = vision
         self._active: dict[str, _Session] = {}
         self._locks: dict[str, asyncio.Lock] = {}
 
@@ -220,7 +223,10 @@ class GroupSessionManager:
             if session.mute_requested:
                 await self._end(session, "mute", summarize=False)
                 return None
-            ctx = self._turn_context(session, msg, trigger, buffered)
+            ctx = await self._turn_context(session, msg, trigger, buffered)
+            if session.mute_requested:  # a mute arrived while the images were being fetched
+                await self._end(session, "mute", summarize=False)
+                return None
             result = await session.runner.run_turn(ctx)
             session.last_activity = self._clock()
             await self._persist(session)
@@ -257,7 +263,7 @@ class GroupSessionManager:
                     ended.append(gid)
         return tuple(ended)
 
-    def _turn_context(
+    async def _turn_context(
         self,
         session: _Session,
         msg: InboundMessage,
@@ -266,24 +272,40 @@ class GroupSessionManager:
     ) -> TurnContext:
         # ChannelKind is "qq" only; group turns use the group's QQ account as the channel account.
         channel = Channel("qq", session.group_id)
+        vision = self._vision
         if trigger == "proactive":
             lines = [f"[成员 {b.user_id}] {b.text}" for b in buffered]
             text = PROACTIVE_PROMPT + "\n" + "\n".join(lines)
+            item = (
+                await vision.attach(
+                    session.session_id,
+                    text,
+                    [url for b in buffered for url in b.image_urls],
+                    newest=True,
+                )
+                if vision is not None
+                else user_message(text)
+            )
             return TurnContext(
                 user_id="",
                 session_id=session.session_id,
                 source_channel=channel,
                 source_message_id=None,
-                new_items=[user_message(text)],
+                new_items=[item],
                 reason="system_event",
             )
         text = f"[成员 {msg.user_id}] {plain_text(msg.segments)}"
+        item = (
+            await vision.attach(session.session_id, text, segment_image_urls(msg.segments))
+            if vision is not None
+            else user_message(text)
+        )
         return TurnContext(
             user_id=msg.user_id,
             session_id=session.session_id,
             source_channel=channel,
             source_message_id=msg.message_id,
-            new_items=[user_message(text)],
+            new_items=[item],
             reason="user",
         )
 
@@ -330,6 +352,8 @@ class GroupSessionManager:
             _instructions(GROUP_INSTRUCTIONS, card),
             self._sender,
             reasoning_effort=self._chat_effort,
+            images=self._vision.store if self._vision is not None else None,
+            recent_image_turns=self._vision.recent_image_turns if self._vision is not None else 0,
         )
         return _Session(
             group_id=group_id,

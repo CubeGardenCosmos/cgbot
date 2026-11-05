@@ -7,9 +7,10 @@ from pathlib import Path
 
 import pytest
 
-from cgbot.coding import staging
 from cgbot.coding.contracts import workspace_dir
 from cgbot.coding.staging import ImageStager, StageError
+from cgbot.vision import ImageError
+from cgbot.vision import fetch as vfetch
 
 PNG = b"\x89PNG\r\n\x1a\nimage"
 NOW = 1793318400.0
@@ -59,9 +60,9 @@ async def test_rejects_unsupported_magic(tmp_path: Path, data: bytes) -> None:
 
 
 async def test_size_cap_includes_injected_fetch(tmp_path: Path) -> None:
-    data = PNG + b"x" * (staging.MAX_IMAGE_BYTES - len(PNG))
+    data = PNG + b"x" * (vfetch.MAX_IMAGE_BYTES - len(PNG))
     result = await ImageStager(tmp_path, fetch=Fetch(data)).stage("123", URL)
-    assert host_path(tmp_path, result).stat().st_size == staging.MAX_IMAGE_BYTES
+    assert host_path(tmp_path, result).stat().st_size == vfetch.MAX_IMAGE_BYTES
     with pytest.raises(StageError) as caught:
         await ImageStager(tmp_path, fetch=Fetch(data + b"x")).stage("123", URL)
     assert caught.value.code == "too_large"
@@ -249,9 +250,9 @@ async def test_resolver_rejects_private_dns_without_network(
         async def close(self) -> None:
             pass
 
-    monkeypatch.setattr(staging, "ThreadedResolver", Resolver)
-    resolver = staging._PublicResolver()
-    with pytest.raises(StageError) as caught:
+    monkeypatch.setattr(vfetch, "ThreadedResolver", Resolver)
+    resolver = vfetch._PublicResolver()
+    with pytest.raises(ImageError) as caught:
         await resolver.resolve("images.example", 443, socket.AF_INET)
     assert caught.value.code == "blocked_address"
     await resolver.close()
@@ -277,9 +278,9 @@ async def test_resolver_rejects_mixed_public_private_results(
         async def close(self) -> None:
             pass
 
-    monkeypatch.setattr(staging, "ThreadedResolver", Resolver)
-    resolver = staging._PublicResolver()
-    with pytest.raises(StageError) as caught:
+    monkeypatch.setattr(vfetch, "ThreadedResolver", Resolver)
+    resolver = vfetch._PublicResolver()
+    with pytest.raises(ImageError) as caught:
         await resolver.resolve("images.example", 443, socket.AF_INET)
     assert caught.value.code == "blocked_address"
     await resolver.close()
@@ -290,7 +291,7 @@ async def test_injected_fetch_timeout(tmp_path: Path, monkeypatch: pytest.Monkey
         await asyncio.sleep(60)
         return PNG
 
-    monkeypatch.setattr(staging, "FETCH_TIMEOUT_SECONDS", 0.001)
+    monkeypatch.setattr(vfetch, "FETCH_TIMEOUT_SECONDS", 0.001)
     with pytest.raises(StageError) as caught:
         await ImageStager(tmp_path, fetch=slow).stage("123", URL)
     assert caught.value.code == "download_failed"
@@ -303,8 +304,8 @@ async def test_injected_fetch_timeout(tmp_path: Path, monkeypatch: pytest.Monkey
         (302, 0, [], "download_failed"),
         (307, 0, [], "download_failed"),
         (308, 0, [], "download_failed"),
-        (200, staging.MAX_IMAGE_BYTES + 1, [], "too_large"),
-        (200, None, [b"x" * staging.MAX_IMAGE_BYTES, b"x"], "too_large"),
+        (200, vfetch.MAX_IMAGE_BYTES + 1, [], "too_large"),
+        (200, None, [b"x" * vfetch.MAX_IMAGE_BYTES, b"x"], "too_large"),
         (200, None, [PNG], None),
     ],
 )
@@ -334,7 +335,7 @@ async def test_default_fetch_stream_limits_and_redirect_rejection_without_networ
     class Session:
         def __init__(self, **kwargs: object) -> None:
             assert kwargs["trust_env"] is False
-            assert isinstance(kwargs["timeout"], staging.aiohttp.ClientTimeout)
+            assert isinstance(kwargs["timeout"], vfetch.aiohttp.ClientTimeout)
 
         async def __aenter__(self):
             return self
@@ -351,14 +352,14 @@ async def test_default_fetch_stream_limits_and_redirect_rejection_without_networ
         async def close(self) -> None:
             pass
 
-    monkeypatch.setattr(staging, "_PublicResolver", Resolver)
-    monkeypatch.setattr(staging.aiohttp, "TCPConnector", lambda **kwargs: object())
-    monkeypatch.setattr(staging.aiohttp, "ClientSession", Session)
+    monkeypatch.setattr(vfetch, "_PublicResolver", Resolver)
+    monkeypatch.setattr(vfetch.aiohttp, "TCPConnector", lambda **kwargs: object())
+    monkeypatch.setattr(vfetch.aiohttp, "ClientSession", Session)
     if error is None:
-        assert await staging.default_fetch(URL) == PNG
+        assert await vfetch.default_fetch(URL) == PNG
     else:
-        with pytest.raises(StageError) as caught:
-            await staging.default_fetch(URL)
+        with pytest.raises(ImageError) as caught:
+            await vfetch.default_fetch(URL)
         assert caught.value.code == error
 
 

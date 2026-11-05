@@ -1,7 +1,8 @@
 """OpenAI Responses adapter for the single upstream (R1.5).
 
 Wire format lives only here. Requests are always sent with ``store=false``; the caller sends the
-full history each turn. Transport, errors and the result hook come from ``transport.py``.
+full history each turn. Input items (including ``input_image`` parts) are sent unchanged. Transport,
+errors and the result hook come from ``transport.py``.
 """
 
 from __future__ import annotations

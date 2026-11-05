@@ -28,6 +28,14 @@ private = "high"     # 日常私聊
 planning = "max"     # 任务规划(设计待定)
 group = "low"        # 群聊轮次
 
+[provider.vision]
+enabled = true                  # 2026-11-05:聊天图片作为 input_image 发给模型(模型为多模态)
+max_images_per_turn = 4         # 单条消息最多取几张
+recent_image_turns = 3          # 仅最近 N 个带图用户轮次发真实图片,更早的退化为 [图片] 文字
+max_edge = 1536                 # 长边上限(像素);超出缩小后重编码
+retention_images = 200          # 每个私聊/群范围最多保留的图片数
+retention_days = 30             # 图片保留天数
+
 [storage]
 data_dir = "/app/data"   # 绝对路径,对应宿主机 /home/klp/cgbot-run/state
 

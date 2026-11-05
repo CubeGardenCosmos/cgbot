@@ -52,6 +52,8 @@ from cgbot.scheduler import KIND_COMPACTION_IDLE, Scheduler, SystemEvent
 from cgbot.search import SearchService, search_tools
 from cgbot.search.gemini import GeminiSearchClient
 from cgbot.session import AsyncSessionStore
+from cgbot.vision import build_vision, segment_image_urls
+from cgbot.vision.fetch import Fetch, default_fetch
 from cgbot.voice import (
     AsrClient,
     JsonServiceClient,
@@ -70,6 +72,7 @@ SPILL_DIR = "spill"
 # [推论] Budget for remembered facts injected into each private turn.
 MEMORY_PROMPT_CHARS = 2000
 MEMORY_HEADER = "以下是你已记住的关于该用户的信息:"
+IMAGE_PRUNE_SECONDS = 3600.0
 SCHEDULER_HANDLER_TIMEOUT = 30.0  # round 20: per-attempt timeout
 GROUP_SWEEP_SECONDS = 30.0
 RECORD_FAILED = "[语音识别失败]"
@@ -238,6 +241,7 @@ class App:
         *,
         timebase: Timebase | None = None,
         omp_http_client_factory: ClientFactory = default_client_factory,
+        image_fetch: Fetch = default_fetch,
     ) -> None:
         self._config = config
         storage = config.storage
@@ -312,9 +316,12 @@ class App:
             else None
         )
         self._image_stager = (
-            ImageStager(config.coding.docker.host_data_dir) if config.coding is not None else None
+            ImageStager(config.coding.docker.host_data_dir, fetch=image_fetch)
+            if config.coding is not None
+            else None
         )
         self._memes = MemeStore(storage.for_module("meme"))
+        self._vision = build_vision(config.provider.vision, storage.images, fetch=image_fetch)
         registry = builtin_tools()
         for spec in memory_tools(self._memory):
             registry.register(spec)
@@ -337,6 +344,8 @@ class App:
             sender=self._send,
             reasoning_effort=effort_for("private", tiers),
             on_response=self._on_response,
+            images=self._vision.store if self._vision is not None else None,
+            recent_image_turns=self._vision.recent_image_turns if self._vision is not None else 0,
         )
         self._dispatcher = PrivateDispatcher(
             self._runner, timebase, on_turn_done=self._on_turn_done
@@ -368,6 +377,7 @@ class App:
             ),
             chat_reasoning_effort=effort_for("group", tiers),
             summary_reasoning_effort=effort_for("summary", tiers),
+            vision=self._vision,
         )
         self._tasks: set[asyncio.Task[object]] = set()
         self._sweep_task: asyncio.Task[None] | None = None
@@ -375,6 +385,7 @@ class App:
 
     async def start(self) -> None:
         await self._groups.restore()
+        await self._prune_images()
         if self._coding is not None:
             await self._coding.start()
         await self._omp.start()
@@ -431,12 +442,17 @@ class App:
         if notes:
             text += "\n" + "\n".join(notes)
         session_id = await self._identity.private_session_id(identity.user_id)
+        item = (
+            await self._vision.attach(session_id, text, segment_image_urls(message.segments))
+            if self._vision is not None
+            else user_message(text)
+        )
         self._dispatcher.on_message(
             PrivateMessage(
                 session_id=session_id,
                 user_id=identity.user_id,
                 message_id=message.message_id,
-                item=user_message(text),
+                item=item,
                 channel=channel,
                 channels=identity.channels,
             )
@@ -563,12 +579,27 @@ class App:
             log.error("background task failed", exc_info=exc)
 
     async def _sweep_loop(self) -> None:
+        last_prune = time.monotonic()
         while True:
             await asyncio.sleep(GROUP_SWEEP_SECONDS)
             try:
                 await self._groups.sweep()
             except Exception:
                 log.exception("group sweep failed")
+            if self._vision is not None and time.monotonic() - last_prune >= IMAGE_PRUNE_SECONDS:
+                last_prune = time.monotonic()
+                await self._prune_images()
+
+    async def _prune_images(self) -> None:
+        if self._vision is None:
+            return
+        try:
+            removed = await self._vision.store.prune()
+        except Exception:
+            log.exception("chat image prune failed")
+        else:
+            if removed:
+                log.info("chat image retention removed files: count=%d", removed)
 
     async def _stage_private_images(self, user_id: str, segments: Sequence[Segment]) -> list[str]:
         if self._coding is None or self._image_stager is None:

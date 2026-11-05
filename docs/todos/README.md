@@ -21,6 +21,7 @@
 | R1.5 | [供应商抽象层](R1.5-provider-responses.md) | 待验收 |
 | R1.6 | [Agent 循环与 reply 工具](R1.6-agent-loop-reply-tool.md) | 待验收 |
 | R1.7 | [调度器与系统事件队列](R1.7-scheduler-system-events.md) | 待验收 |
+| R1.8 | [聊天多模态图片输入](R1.8-chat-multimodal-images.md) | 进行中 |
 
 ## M2 私聊体验
 

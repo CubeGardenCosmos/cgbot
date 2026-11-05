@@ -5,8 +5,10 @@ results are mapped back to the provider-neutral types. Each result item's ``raw`
 input item, so history replays through either adapter. Mapping:
 
 - ``instructions`` -> leading ``system`` message (skipped when empty).
-- ``message`` items with role user/assistant/system/developer -> chat messages; text parts only
-  (images and other non-text parts are dropped). Empty assistant messages are dropped.
+- ``message`` items with role user/assistant/system/developer -> chat messages. Text parts become
+  the text content; a user message with ``input_image`` parts becomes a list of ``text`` and
+  ``image_url`` (``{"url": <data URL>}``) parts in the original order. Images in other roles and
+  other non-text parts are dropped. Empty assistant messages are dropped.
 - ``function_call`` -> ``tool_calls`` of an assistant message; ``function_call_output`` -> a
   ``tool`` message with the same id. A call is sent only when its output is present, and outputs
   are emitted right after their call group, so every ``tool_calls`` id is answered. Unpaired
@@ -299,10 +301,45 @@ def _text_of(content: object) -> str:
     )
 
 
+def _image_url(part: Mapping[str, Any]) -> str | None:
+    value = part.get("image_url")
+    if isinstance(value, Mapping):
+        value = value.get("url")
+    return value if isinstance(value, str) and value else None
+
+
+def _user_parts(content: object) -> list[dict[str, Any]] | None:
+    """Chat content parts of a user message that carries images, else ``None`` (plain text).
+
+    ``input_text`` -> ``text`` part, ``input_image`` -> ``image_url`` part, in the original order.
+    """
+    if not isinstance(content, list):
+        return None
+    parts: list[dict[str, Any]] = []
+    has_image = False
+    for part in content:
+        if not isinstance(part, Mapping):
+            continue
+        if part.get("type") in _TEXT_PART_TYPES:
+            text = str(part.get("text", ""))
+            if text:
+                parts.append({"type": "text", "text": text})
+        elif part.get("type") == "input_image":
+            url = _image_url(part)
+            if url is not None:
+                parts.append({"type": "image_url", "image_url": {"url": url}})
+                has_image = True
+    return parts if has_image else None
+
+
 def _message(item: Mapping[str, Any]) -> dict[str, Any] | None:
     role = _CHAT_ROLES.get(str(item.get("role")))
     if role is None:
         return None
+    if role == "user":
+        parts = _user_parts(item.get("content"))
+        if parts is not None:
+            return {"role": role, "content": parts}
     text = _text_of(item.get("content"))
     if role == "assistant" and not text:
         return None
