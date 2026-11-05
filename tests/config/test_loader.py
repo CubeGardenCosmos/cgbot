@@ -478,3 +478,19 @@ def test_retry_invalid_values_are_named(
     with pytest.raises(ConfigError) as info:
         load_with(tmp_path, toml, secrets_file)
     assert info.value.key == key
+
+
+def test_timezone_defaults_to_kuala_lumpur_and_accepts_iana_name(
+    tmp_path: Path, secrets_file: Path
+) -> None:
+    assert load_with(tmp_path, BASE_TOML, secrets_file).group.timezone == "Asia/Kuala_Lumpur"
+    toml = BASE_TOML + '\n[group]\ntimezone = "UTC"\n'
+    assert load_with(tmp_path, toml, secrets_file).group.timezone == "UTC"
+
+
+@pytest.mark.parametrize("value", ['"Mars/Olympus"', '""', '"../etc/passwd"', "5"])
+def test_invalid_timezone_is_a_config_error(tmp_path: Path, secrets_file: Path, value: str) -> None:
+    toml = BASE_TOML + f"\n[group]\ntimezone = {value}\n"
+    with pytest.raises(ConfigError) as info:
+        load_with(tmp_path, toml, secrets_file)
+    assert info.value.key == "group.timezone"

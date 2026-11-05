@@ -1,7 +1,9 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+import time
+from datetime import UTC, datetime, timedelta, timezone, tzinfo
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -50,7 +52,7 @@ class Harness:
         path: Path,
         *,
         rolls: tuple[int, ...] = (),
-        tz: timezone | None = TZ,
+        tz: tzinfo = TZ,
         policy: GatePolicy | None = None,
         groups: frozenset[str] = frozenset({GROUP, OTHER_GROUP}),
     ) -> None:
@@ -416,12 +418,22 @@ async def test_followup_is_not_extended_during_sleep(harness: Harness) -> None:
 # --- timezone and policy ------------------------------------------------------------------
 
 
-async def test_default_timezone_uses_system_local_hours(tmp_path: Path) -> None:
-    harness = Harness(tmp_path / "s.sqlite", tz=None)
-    at_three = datetime(2026, 10, 30, 3, 0).timestamp()
-    at_nine = datetime(2026, 10, 30, 9, 0).timestamp()
-    assert await harness.send(at_three, "夜") == decided("ignore", "sleep")
-    assert await harness.send(at_nine, "早") == decided("ignore", "roll_miss")
+async def test_local_hours_use_configured_zone_not_process_tz(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("TZ", "America/Los_Angeles")
+    time.tzset()
+    try:
+        harness = Harness(tmp_path / "s.sqlite", tz=ZoneInfo("Asia/Kuala_Lumpur"))
+        # 19:00Z is 03:00 in Kuala Lumpur (sleep) and 12:00 in Los Angeles.
+        at_three = datetime(2026, 10, 29, 19, 0, tzinfo=UTC).timestamp()
+        # 01:00Z is 09:00 in Kuala Lumpur (awake) and 18:00 the previous day in Los Angeles.
+        at_nine = datetime(2026, 10, 30, 1, 0, tzinfo=UTC).timestamp()
+        assert await harness.send(at_three, "夜") == decided("ignore", "sleep")
+        assert await harness.send(at_nine, "早") == decided("ignore", "roll_miss")
+    finally:
+        monkeypatch.undo()
+        time.tzset()
 
 
 def test_policy_rejects_invalid_values() -> None:

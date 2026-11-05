@@ -17,6 +17,7 @@ from collections.abc import Coroutine, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from cgbot.agent import AgentRunner, TurnResult, builtin_tools
 from cgbot.agent.tools import ToolContext, ToolResult, ToolSpec
@@ -565,6 +566,7 @@ class App:
                 store=self._group_state,
                 clock=time.time,
                 rng=random.Random(),
+                tz=ZoneInfo(self._config.group.timezone),
             )
         return self._gate
 

@@ -51,6 +51,7 @@ skill_memes = 10
 skill_rules = 10
 skill_members = 20
 skill_habits_per_member = 5
+timezone = "Asia/Kuala_Lumpur"   # IANA 时区:群门控睡眠/主动时段与日志时间戳均按此计,不依赖进程 TZ
 
 # 语音未启用:省略 [voice]。启用前须确认 ASR/TTS 守护进程地址在容器内可达。
 

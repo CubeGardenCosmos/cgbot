@@ -29,7 +29,7 @@ services:
     mem_limit: 1g
     cpus: 2
     environment:
-      TZ: Asia/Shanghai
+      TZ: Asia/Kuala_Lumpur
     volumes:
       - ./config.toml:/app/config/config.toml:ro
       - ./secrets.toml:/run/secrets/cgbot.toml:ro

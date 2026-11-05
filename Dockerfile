@@ -73,7 +73,7 @@ COPY --from=build /opt/venv /opt/venv
 ENV PATH=/opt/venv/bin:$PATH \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    TZ=Asia/Shanghai
+    TZ=Asia/Kuala_Lumpur
 
 WORKDIR /app
 # Mount points only. The real config.toml and secrets are bind-mounted at run time.

@@ -9,9 +9,11 @@ import signal
 import sys
 from collections.abc import Sequence
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from cgbot.app import App
 from cgbot.config import Config, ConfigError, load_config
+from cgbot.logfmt import ZonedFormatter
 from cgbot.provider import build_provider
 
 
@@ -46,10 +48,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     except ConfigError as exc:
         print(f"config error: {exc}", file=sys.stderr)
         return 2
-    logging.basicConfig(
-        level=config.logging.level,
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-    )
+    handler = logging.StreamHandler()
+    handler.setFormatter(ZonedFormatter(ZoneInfo(config.group.timezone)))
+    logging.basicConfig(level=config.logging.level, handlers=[handler])
     asyncio.run(_serve(config))
     return 0
 

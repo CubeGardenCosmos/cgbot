@@ -14,6 +14,7 @@ if TYPE_CHECKING:
 Scope = Literal["private", "group"]
 WireApi = Literal["responses", "chat"]
 WIRE_APIS: Final = ("responses", "chat")
+DEFAULT_TIMEZONE: Final = "Asia/Kuala_Lumpur"
 
 
 class ConfigError(Exception):
@@ -128,7 +129,8 @@ class ProviderConfig:
 
 @dataclass(frozen=True, slots=True)
 class GroupConfig:
-    """Group chat settings: keyword rules, session lifetime, and group skill-card limits."""
+    """Group chat settings: keyword rules, session lifetime, group skill-card limits, and the
+    IANA ``timezone`` that defines the local clock for gate hours and log timestamps."""
 
     wake_keywords: tuple[str, ...]
     mute_keywords: tuple[str, ...]
@@ -139,6 +141,7 @@ class GroupConfig:
     skill_rules: int = 10
     skill_members: int = 20
     skill_habits_per_member: int = 5
+    timezone: str = DEFAULT_TIMEZONE  # IANA name, validated by the loader
 
 
 @dataclass(frozen=True, slots=True)

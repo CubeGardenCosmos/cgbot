@@ -99,7 +99,7 @@ class GroupGate:
         store: GroupStateStore,
         clock: Clock,
         rng: Rng,
-        tz: tzinfo | None = None,
+        tz: tzinfo,
         policy: GatePolicy | None = None,
     ) -> None:
         self._scope = scope

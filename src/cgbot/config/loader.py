@@ -9,6 +9,7 @@ import tomllib
 from collections.abc import Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING, Final
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from cgbot.config.settings import (
     DEFAULT_RETRY_ATTEMPTS,
@@ -193,9 +194,19 @@ def _group(t: _Table) -> GroupConfig:
         skill_habits_per_member=t.positive_int_or(
             "skill_habits_per_member", defaults.skill_habits_per_member
         ),
+        timezone=_timezone(t, defaults.timezone),
     )
     t.close()
     return group
+
+
+def _timezone(t: _Table, default: str) -> str:
+    name = t.text_or("timezone", default)
+    try:
+        ZoneInfo(name)
+    except (ZoneInfoNotFoundError, ValueError, OSError) as exc:
+        raise t.error("timezone", "须为有效的 IANA 时区名,例:Asia/Kuala_Lumpur") from exc
+    return name
 
 
 def _storage(t: _Table, base_dir: Path) -> StoragePaths:
