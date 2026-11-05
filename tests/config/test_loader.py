@@ -451,3 +451,30 @@ def test_wire_api_unknown_value_is_named(tmp_path: Path, secrets_file: Path) -> 
     with pytest.raises(ConfigError) as info:
         load_with(tmp_path, toml, secrets_file)
     assert info.value.key == "provider.wire_api"
+
+
+def test_retry_defaults_and_overrides(tmp_path: Path, secrets_file: Path) -> None:
+    cfg = load_with(tmp_path, BASE_TOML, secrets_file)
+    assert cfg.provider.retry_attempts == 2
+    assert cfg.provider.retry_backoff == (2.0, 5.0)
+    toml = edit(BASE_TOML, "model = ", "retry_attempts = 0\nretry_backoff = [1, 3.5]\nmodel = ")
+    cfg = load_with(tmp_path, toml, secrets_file)
+    assert cfg.provider.retry_attempts == 0
+    assert cfg.provider.retry_backoff == (1.0, 3.5)
+
+
+@pytest.mark.parametrize(
+    ("line", "key"),
+    [
+        ("retry_attempts = -1", "provider.retry_attempts"),
+        ("retry_backoff = []", "provider.retry_backoff"),
+        ("retry_backoff = [-1]", "provider.retry_backoff"),
+    ],
+)
+def test_retry_invalid_values_are_named(
+    tmp_path: Path, secrets_file: Path, line: str, key: str
+) -> None:
+    toml = edit(BASE_TOML, "model = ", f"{line}\nmodel = ")
+    with pytest.raises(ConfigError) as info:
+        load_with(tmp_path, toml, secrets_file)
+    assert info.value.key == key

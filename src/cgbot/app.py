@@ -77,6 +77,8 @@ SCHEDULER_HANDLER_TIMEOUT = 30.0  # round 20: per-attempt timeout
 GROUP_SWEEP_SECONDS = 30.0
 RECORD_FAILED = "[语音识别失败]"
 PRIVATE_NOTICE_PREFIX = "[系统通知] "
+# R1.6: fixed notice for a private turn that failed on the model with no reply sent (not via model).
+MODEL_FAILURE_NOTICE = "（上游模型暂时连不上，这条没能回复，请稍后再发一次）"
 _GROUP_TRIGGERS: Mapping[str, GroupTrigger] = {
     "wake": "wake",
     "followup": "followup",
@@ -346,6 +348,7 @@ class App:
             on_response=self._on_response,
             images=self._vision.store if self._vision is not None else None,
             recent_image_turns=self._vision.recent_image_turns if self._vision is not None else 0,
+            failure_notice=MODEL_FAILURE_NOTICE,
         )
         self._dispatcher = PrivateDispatcher(
             self._runner, timebase, on_turn_done=self._on_turn_done

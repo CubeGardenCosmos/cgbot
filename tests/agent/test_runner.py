@@ -844,3 +844,83 @@ async def test_async_instructions_resolve_per_session(store: AsyncSessionStore) 
 
     assert asked == [SID]
     assert provider.requests[0].instructions == f"prompt for {SID}"
+
+
+NOTICE = "（上游模型暂时连不上，这条没能回复，请稍后再发一次）"
+
+
+def notice_runner(
+    store: AsyncSessionStore, provider: ScriptedProvider, sender: RecordingSender
+) -> AgentRunner:
+    return AgentRunner(
+        provider=provider,
+        store=store,
+        tools=builtin_tools(),
+        instructions="be brief",
+        sender=sender,
+        failure_notice=NOTICE,
+    )
+
+
+async def test_private_model_failure_notifies_user_once(store: AsyncSessionStore) -> None:
+    sender = RecordingSender()
+    provider = ScriptedProvider(UpstreamUnavailable("upstream unreachable: ConnectError"))
+    runner = notice_runner(store, provider, sender)
+
+    result = await runner.run_turn(turn())
+
+    assert result.status == "failed"
+    assert len(sender.sent) == 1
+    msg = sender.sent[0]
+    assert (msg.scope, msg.target_id) == ("private", SRC.account)
+    assert msg.segments[0].data == {"text": NOTICE}
+    events = [i for i in await rows(store) if i.kind == "system_event"]
+    assert [e.payload["event"] for e in events] == ["model_failed", "model_failure_notice"]
+    assert events[1].payload["sent"] is True
+    assert all("item" not in e.payload for e in events)
+    assert not [i for i in await rows(store) if i.kind == "assistant"]
+
+
+async def test_failed_notice_send_is_recorded_not_raised(store: AsyncSessionStore) -> None:
+    sender = RecordingSender(ok=False)
+    provider = ScriptedProvider(UpstreamUnavailable("down", status=503, body=""))
+    runner = notice_runner(store, provider, sender)
+
+    result = await runner.run_turn(turn())
+
+    assert result.status == "failed"
+    events = [i for i in await rows(store) if i.kind == "system_event"]
+    assert events[-1].payload["sent"] is False
+
+
+async def test_group_model_failure_posts_nothing(store: AsyncSessionStore) -> None:
+    sender = RecordingSender()
+    provider = ScriptedProvider(UpstreamUnavailable("down", status=503, body=""))
+    runner = notice_runner(store, provider, sender)
+    ctx = TurnContext(
+        user_id=USER,
+        session_id="group:g1",
+        source_channel=SRC,
+        source_message_id=None,
+        new_items=[user_message("hi")],
+        reason="user",
+    )
+
+    result = await runner.run_turn(ctx)
+
+    assert result.status == "failed"
+    assert sender.sent == []
+
+
+async def test_no_notice_when_a_reply_was_already_sent(store: AsyncSessionStore) -> None:
+    sender = RecordingSender()
+    provider = ScriptedProvider(
+        calls_resp(("c1", "reply", {"text": "pong"})),
+        UpstreamUnavailable("down", status=503, body=""),
+    )
+    runner = notice_runner(store, provider, sender)
+
+    result = await runner.run_turn(turn())
+
+    assert result.status == "failed" and result.replies_sent == 1
+    assert [m.segments[0].data["text"] for m in sender.sent] == ["pong"]

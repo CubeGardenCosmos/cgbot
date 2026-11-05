@@ -107,6 +107,10 @@ class VisionConfig:
     retention_days: int = 30
 
 
+DEFAULT_RETRY_ATTEMPTS = 2
+DEFAULT_RETRY_BACKOFF: tuple[float, ...] = (2.0, 5.0)
+
+
 @dataclass(frozen=True, slots=True)
 class ProviderConfig:
     """Single model provider; ``wire_api`` selects Responses or Chat Completions on the upstream."""
@@ -117,6 +121,8 @@ class ProviderConfig:
     api_key: Secret
     reasoning: ReasoningTiers
     wire_api: WireApi = "responses"  # wire format: Responses (default) or Chat Completions
+    retry_attempts: int = DEFAULT_RETRY_ATTEMPTS  # extra tries after a transient failure
+    retry_backoff: tuple[float, ...] = DEFAULT_RETRY_BACKOFF  # seconds before retry n; last repeats
     vision: VisionConfig = field(default_factory=lambda: VisionConfig())
 
 

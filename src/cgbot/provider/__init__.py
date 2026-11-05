@@ -35,6 +35,8 @@ def build_provider(
             model=cfg.model,
             context_window=cfg.context_window,
             http=http,
+            retry_attempts=cfg.retry_attempts,
+            retry_backoff=cfg.retry_backoff,
         )
     if cfg.wire_api == "chat":
         return ChatCompletionsProvider(
@@ -43,6 +45,8 @@ def build_provider(
             model=cfg.model,
             context_window=cfg.context_window,
             http=http,
+            retry_attempts=cfg.retry_attempts,
+            retry_backoff=cfg.retry_backoff,
         )
     raise ConfigError("provider.wire_api", f"未知值 {cfg.wire_api!r}")
 

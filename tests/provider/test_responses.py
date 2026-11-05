@@ -44,7 +44,14 @@ def make_provider(
 ) -> ResponsesProvider:
     client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
     return ResponsesProvider(
-        BASE, KEY, "test-model", 128000, http=client, timeout=5.0, on_result=on_result
+        BASE,
+        KEY,
+        "test-model",
+        128000,
+        http=client,
+        timeout=5.0,
+        on_result=on_result,
+        retry_attempts=0,
     )
 
 

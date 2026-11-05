@@ -11,6 +11,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Final
 
 from cgbot.config.settings import (
+    DEFAULT_RETRY_ATTEMPTS,
+    DEFAULT_RETRY_BACKOFF,
     SEARCH_ENGINE_NAMES,
     WIRE_APIS,
     Config,
@@ -132,6 +134,8 @@ def _provider(t: _Table, source: _SecretSource) -> ProviderConfig:
     if wire_text not in WIRE_APIS:
         raise t.error("wire_api", "须为 responses 或 chat")
     wire_api: WireApi = "chat" if wire_text == "chat" else "responses"
+    retry_attempts = t.non_negative_int_or("retry_attempts", DEFAULT_RETRY_ATTEMPTS)
+    retry_backoff = t.number_list_or("retry_backoff", DEFAULT_RETRY_BACKOFF)
 
     defaults = ReasoningTiers()
     tiers = t.sub("reasoning")
@@ -151,6 +155,8 @@ def _provider(t: _Table, source: _SecretSource) -> ProviderConfig:
         api_key=api_key,
         reasoning=reasoning,
         wire_api=wire_api,
+        retry_attempts=retry_attempts,
+        retry_backoff=retry_backoff,
         vision=vision,
     )
 
@@ -470,6 +476,29 @@ class _Table:
         if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
             raise self.error(name, "须为正整数")
         return value
+
+    def non_negative_int_or(self, name: str, default: int) -> int:
+        value = self._take(name)
+        if value is _MISSING:
+            return default
+        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+            raise self.error(name, "须为非负整数")
+        return value
+
+    def number_list_or(self, name: str, default: tuple[float, ...]) -> tuple[float, ...]:
+        """Non-empty list of non-negative numbers (seconds)."""
+        value = self._take(name)
+        if value is _MISSING:
+            return default
+        if (
+            not isinstance(value, list)
+            or not value
+            or not all(
+                isinstance(v, int | float) and not isinstance(v, bool) and v >= 0 for v in value
+            )
+        ):
+            raise self.error(name, "须为非空的非负数列表(秒)")
+        return tuple(float(v) for v in value)
 
     def positive_number_or(self, name: str, default: float) -> float:
         value = self._take(name)

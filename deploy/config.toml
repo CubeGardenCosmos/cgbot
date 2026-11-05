@@ -19,6 +19,8 @@ owner = 2749478757
 base_url = "https://api.cicori.com/v1"      # 兼容 Responses 与 Chat Completions
 model = "deepseek-v4.1-flash"
 wire_api = "responses"
+retry_attempts = 2
+retry_backoff = [2.0, 5.0]
 context_window = 128000                     # [推论] 未向上游查证;压缩阈值按此计算
 api_key_ref = "provider_api_key"
 

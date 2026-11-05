@@ -93,6 +93,7 @@ def make_provider(handler: Handler, on_result: Any = None) -> ChatCompletionsPro
         context_window=64000,
         http=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
         on_result=on_result,
+        retry_attempts=0,
     )
 
 

@@ -9,21 +9,33 @@ success).
 
 from __future__ import annotations
 
+import asyncio
 import json
-from collections.abc import AsyncGenerator, AsyncIterator, Callable, Mapping
-from contextlib import asynccontextmanager
+import logging
+from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable, Mapping, Sequence
+from contextlib import AsyncExitStack, asynccontextmanager
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
 from typing import Any, ClassVar
 
 import httpx
 
+from cgbot.config.settings import DEFAULT_RETRY_ATTEMPTS, DEFAULT_RETRY_BACKOFF
 from cgbot.provider.errors import BadRequest, ProviderError, RateLimited, UpstreamUnavailable
 from cgbot.provider.types import ModelRequest
+
+log = logging.getLogger(__name__)
 
 ResultHook = Callable[[int | None, Exception | None], None]
 
 _EXCERPT_LIMIT = 500
+
+RETRY_AFTER_CAP = 30.0
+
+
+def _transient(exc: ProviderError) -> bool:
+    """Failures worth retrying before any response is open: transport, timeout, 5xx, 429."""
+    return isinstance(exc, RateLimited | UpstreamUnavailable)
 
 
 class HttpUpstream:
@@ -44,6 +56,9 @@ class HttpUpstream:
         http: httpx.AsyncClient | None = None,
         timeout: float = 120.0,
         on_result: ResultHook | None = None,
+        retry_attempts: int = DEFAULT_RETRY_ATTEMPTS,
+        retry_backoff: Sequence[float] = DEFAULT_RETRY_BACKOFF,
+        sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
     ) -> None:
         if context_window <= 0:
             raise ValueError("context_window must be positive")
@@ -55,6 +70,11 @@ class HttpUpstream:
         self._owns_http = http is None
         self._http = http if http is not None else httpx.AsyncClient()
         self.on_result = on_result
+        if retry_attempts < 0:
+            raise ValueError("retry_attempts must not be negative")
+        self._retry_attempts = retry_attempts
+        self._retry_backoff = tuple(retry_backoff)
+        self._sleep = sleep
 
     def __repr__(self) -> str:
         return (
@@ -81,28 +101,80 @@ class HttpUpstream:
     async def _exchange(
         self, request: ModelRequest, *, stream: bool
     ) -> AsyncIterator[httpx.Response]:
-        """Open the request; raise a mapped ProviderError for non-2xx or transport failures."""
+        """Open the request; raise a mapped ProviderError for non-2xx or transport failures.
+
+        Transient failures before a 2xx response is open are retried (see ``_open``). Once the
+        caller holds the response nothing is retried: body or stream errors surface as-is.
+        """
+        stack, resp = await self._open(request, stream)
+        try:
+            yield resp
+        except httpx.TimeoutException as exc:
+            raise UpstreamUnavailable("upstream request timed out") from exc
+        except httpx.TransportError as exc:
+            raise UpstreamUnavailable(f"upstream unreachable: {type(exc).__name__}") from exc
+        finally:
+            await stack.aclose()
+
+    async def _open(
+        self, request: ModelRequest, stream: bool
+    ) -> tuple[AsyncExitStack, httpx.Response]:
+        for attempt in range(self._retry_attempts + 1):
+            stack = AsyncExitStack()
+            try:
+                return stack, await self._open_once(stack, request, stream)
+            except ProviderError as exc:
+                await stack.aclose()
+                if attempt >= self._retry_attempts or not _transient(exc):
+                    raise
+                delay = self._retry_delay(attempt, exc)
+                log.warning(
+                    "provider request failed, retrying: attempt=%d/%d delay=%.1fs error=%s: %s",
+                    attempt + 1,
+                    self._retry_attempts + 1,
+                    delay,
+                    type(exc).__name__,
+                    exc,
+                )
+                await self._sleep(delay)
+            except BaseException:
+                await stack.aclose()
+                raise
+        raise AssertionError("unreachable")  # pragma: no cover
+
+    async def _open_once(
+        self, stack: AsyncExitStack, request: ModelRequest, stream: bool
+    ) -> httpx.Response:
         headers = {
             "Authorization": f"Bearer {self._api_key}",
             "Accept": "text/event-stream" if stream else "application/json",
         }
         body = self._body(request, stream=stream)
         try:
-            async with self._http.stream(
-                "POST",
-                f"{self._base_url}{self._PATH}",
-                json=body,
-                headers=headers,
-                timeout=self._timeout,
-            ) as resp:
-                if not resp.is_success:
-                    await resp.aread()
-                    raise http_error(resp, self._api_key)
-                yield resp
+            resp = await stack.enter_async_context(
+                self._http.stream(
+                    "POST",
+                    f"{self._base_url}{self._PATH}",
+                    json=body,
+                    headers=headers,
+                    timeout=self._timeout,
+                )
+            )
+            if not resp.is_success:
+                await resp.aread()
+                raise http_error(resp, self._api_key)
         except httpx.TimeoutException as exc:
             raise UpstreamUnavailable("upstream request timed out") from exc
         except httpx.TransportError as exc:
             raise UpstreamUnavailable(f"upstream unreachable: {type(exc).__name__}") from exc
+        return resp
+
+    def _retry_delay(self, attempt: int, exc: ProviderError) -> float:
+        if isinstance(exc, RateLimited) and exc.retry_after is not None:
+            return min(exc.retry_after, RETRY_AFTER_CAP)
+        if not self._retry_backoff:
+            return 0.0
+        return self._retry_backoff[min(attempt, len(self._retry_backoff) - 1)]
 
     def _decode(self, raw: bytes, status: int) -> Mapping[str, Any]:
         try:

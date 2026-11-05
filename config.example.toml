@@ -29,6 +29,8 @@ groups = []          # 固定群号,纯数字
 base_url = "https://example.invalid/v1"  # 上游根地址;responses 请求 {base_url}/responses,chat 请求 {base_url}/chat/completions
 model = "your-model-name"
 wire_api = "responses"              # responses(默认,OpenAI Responses 兼容)| chat(Chat Completions 兼容)
+retry_attempts = 2                  # 响应开始前遇连接失败/超时/5xx/429 的额外重试次数,0 为不重试
+retry_backoff = [2.0, 5.0]          # 各次重试前等待秒数(最后一个值重复使用);429 优先按 Retry-After(上限 30 秒)
 context_window = 128000             # 上游模型上下文窗口,token 数,正整数,必填
 api_key_ref = "provider_api_key"         # 密钥引用名,值见文件头说明
 

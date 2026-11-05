@@ -44,7 +44,8 @@ from cgbot.agent.tools import (
     available_channels,
     channel_key,
 )
-from cgbot.model import Channel, OutboundMessage, SendResult
+from cgbot.memory.domain import PRIVATE_SESSION_PREFIX
+from cgbot.model import Channel, OutboundMessage, Segment, SendResult
 from cgbot.provider import (
     FunctionCall,
     ModelProvider,
@@ -125,6 +126,7 @@ class AgentRunner:
         on_response: ResponseObserver | None = None,
         images: ImageSource | None = None,
         recent_image_turns: int = 0,
+        failure_notice: str | None = None,
     ) -> None:
         self._provider = provider
         self._store = store
@@ -135,6 +137,7 @@ class AgentRunner:
         self._on_response = on_response
         self._images = images
         self._recent_image_turns = recent_image_turns
+        self._failure_notice = failure_notice
         self._turns: dict[str, _Turn] = {}
 
     async def run_turn(self, ctx: TurnContext) -> TurnResult:
@@ -254,7 +257,7 @@ class AgentRunner:
             try:
                 response = await self._provider.respond(request)
             except Exception as exc:
-                await self._record_model_failure(ctx, exc)
+                await self._record_model_failure(ctx, turn, exc)
                 return TurnResult("failed", turn.tool_called, turn.replies_sent, _describe(exc))
 
             if self._on_response is not None:
@@ -364,8 +367,15 @@ class AgentRunner:
             await self._append_item(ctx.session_id, "user", item, {"message_id": message_id})
             turn.injected.pop(0)
 
-    async def _record_model_failure(self, ctx: TurnContext, exc: Exception) -> None:
+    async def _record_model_failure(self, ctx: TurnContext, turn: _Turn, exc: Exception) -> None:
         status = exc.status if isinstance(exc, ProviderError) else None
+        log.warning(
+            "model request failed session=%s status=%s replies_sent=%d detail=%s",
+            ctx.session_id,
+            status,
+            turn.replies_sent,
+            _describe(exc),
+        )
         await self._append(
             ctx.session_id,
             "system_event",
@@ -375,6 +385,40 @@ class AgentRunner:
                 "detail": str(exc),
                 "status": status,
             },
+        )
+        if (
+            self._failure_notice is not None
+            and ctx.session_id.startswith(PRIVATE_SESSION_PREFIX)
+            and turn.replies_sent == 0
+        ):
+            await self._send_failure_notice(ctx)
+
+    async def _send_failure_notice(self, ctx: TurnContext) -> None:
+        """Tell the user in private that the turn got no reply. Fixed text, never via the model;
+        recorded as an input-less ``system_event`` so history replay does not show it as the
+        assistant's words."""
+        assert self._failure_notice is not None
+        error: str | None = None
+        try:
+            result = await self._sender(
+                OutboundMessage(
+                    scope="private",
+                    target_id=ctx.source_channel.account,
+                    segments=(Segment("text", {"text": self._failure_notice}),),
+                )
+            )
+            if not result.ok:
+                error = result.error or "send failed"
+        except Exception as exc:
+            error = _describe(exc)
+        if error is not None:
+            log.warning(
+                "model failure notice not delivered session=%s error=%s", ctx.session_id, error
+            )
+        await self._append(
+            ctx.session_id,
+            "system_event",
+            {"event": "model_failure_notice", "text": self._failure_notice, "sent": error is None},
         )
 
     async def _append_item(
