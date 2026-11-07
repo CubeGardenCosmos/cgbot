@@ -8,12 +8,17 @@ File format (see ``config.example.toml`` at the repo root for a commented copy):
   (bool, default false: true also admits every real QQ friend in private chat; temporary
   sessions do not count), ``owner`` (optional identity marker, does not extend the allowlist).
 - ``[provider]``: ``base_url`` (http/https), ``model``, ``context_window`` (positive int, required),
-  ``api_key_ref`` (required secret name);
+  ``api_key_ref`` (required secret name), ``wire_api`` (``responses`` default | ``chat`` |
+  ``gemini``);
   ``[provider.reasoning]`` tiers ``summary`` (low), ``private`` (high), ``planning`` (max),
   ``group`` (low), passed through to the upstream.
   ``[provider.vision]`` (all optional): ``enabled`` (default false), ``max_images_per_turn`` (4),
   ``recent_image_turns`` (3), ``max_edge`` (1536 px), ``retention_images`` (200 per scope),
   ``retention_days`` (30); inbound chat images are sent to the model as ``input_image`` parts.
+  ``[[provider.fallbacks]]`` (optional ordered array, tried after ``model`` fails): ``model``
+  (required), ``wire_api`` (default ``responses``, not inherited), ``base_url``, ``api_key_ref``,
+  ``context_window`` (each defaults to the ``[provider]`` value); unknown keys are rejected, and
+  retry settings and reasoning tiers are the primary's.
 - ``[storage]``: ``data_dir`` (default ``data``, relative to the config file's directory). It
   holds one SQLite file per domain: ``profile.sqlite`` (identity/channels), ``sessions.sqlite``
   (chat records), ``scheduler.sqlite``, and ``<module>.sqlite`` for later modules.

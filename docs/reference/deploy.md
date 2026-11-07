@@ -33,6 +33,7 @@
 - `deploy/secrets.toml.example` 只列名字。真实 `/home/klp/cgbot-run/secrets.toml` 必须 `chmod 600`,挂载为只读 `/run/secrets/cgbot.toml`。需要的名字:`provider_api_key`(Bot 对话)、`coding_token`、`gateway_api_key`(网关上游),可选 `imagegen_key`。
 - 容器内路径约定:数据目录 `[storage] data_dir = "/app/data"`(绝对路径);`[coding.bridge] temp_dir = "/app/data/bridge"`(绝对路径)。宿主机 `/home/klp/cgbot-run/state` 挂载为 `/app/data`。
 - 占位值:`[provider] context_window = 128000`(标注待查证);`[scope]` 的 `friends`/`groups` 为空列表(全部拒绝,安全默认);`[coding.imagegen]` 省略(图像生成不可用)。
+- 模型降级(2026-11-07):`[[provider.fallbacks]]` 有序数组。模板中为 `deepseek-v4.1-flash`(主)→ `gemini-3.8-flash`(`wire_api = "gemini"`,`base_url = "https://api.cicori.com/v1beta"`)。省略项继承 `[provider]`(`wire_api` 例外,默认 responses),共用 `provider_api_key`;主模型在适配器重试用尽后失败才降级,每轮从主模型重新开始;流式已产生输出后不降级;降级成功记 INFO、每次失败记 WARNING 日志。
 
 ## 4. 宿主机布局(手工一次性创建,deploy.sh 不创建)
 

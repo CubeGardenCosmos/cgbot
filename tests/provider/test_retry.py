@@ -195,6 +195,7 @@ async def test_build_provider_passes_retry_config() -> None:
         retry_backoff=(1.0, 3.0),
     )
     provider = build_provider(cfg)
+    assert isinstance(provider, ResponsesProvider)
     assert provider._retry_attempts == 4  # noqa: SLF001
     assert provider._retry_backoff == (1.0, 3.0)  # noqa: SLF001
     await provider.aclose()

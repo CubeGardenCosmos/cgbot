@@ -26,9 +26,9 @@ groups = []          # 固定群号,纯数字
 # owner = 10000000000  # 可选:主人 QQ 号,仅作身份标记,不会自动加入白名单
 
 [provider]
-base_url = "https://example.invalid/v1"  # 上游根地址;responses 请求 {base_url}/responses,chat 请求 {base_url}/chat/completions
+base_url = "https://example.invalid/v1"  # 上游根地址;responses 请求 {base_url}/responses,chat 请求 {base_url}/chat/completions,gemini 请求 {base_url}/models/<model>:generateContent
 model = "your-model-name"
-wire_api = "responses"              # responses(默认,OpenAI Responses 兼容)| chat(Chat Completions 兼容)
+wire_api = "responses"              # responses(默认,OpenAI Responses 兼容)| chat(Chat Completions 兼容)| gemini(Gemini 原生 generateContent)
 retry_attempts = 2                  # 响应开始前遇连接失败/超时/5xx/429 的额外重试次数,0 为不重试
 retry_backoff = [2.0, 5.0]          # 各次重试前等待秒数(最后一个值重复使用);429 优先按 Retry-After(上限 30 秒)
 context_window = 128000             # 上游模型上下文窗口,token 数,正整数,必填
@@ -49,6 +49,22 @@ recent_image_turns = 3           # 仅最近 N 个带图用户轮次发真实图
 max_edge = 1536                  # 长边上限(像素);超出缩小后重编码(有透明为 PNG,否则 JPEG)
 retention_images = 200           # 每个私聊/群范围最多保留的图片数(超出删最旧)
 retention_days = 30              # 图片保留天数
+
+# 可选:有序降级。主模型(上面的 model)失败后按顺序依次尝试,每一轮对话都从主模型重新开始。
+# 触发条件:适配器自身的重试用尽后仍报错(429/5xx/超时/4xx);流式输出一旦已产生内容就不再降级。
+# 每项只有 model 必填;其余省略时继承 [provider](wire_api 例外:省略 = responses,不继承主模型)。
+# 重试设置与 [provider.reasoning] 档位对所有成员一致;出现未知键会报错。
+# [[provider.fallbacks]]
+# model = "fallback-model-a"       # 必填
+# wire_api = "responses"           # responses(默认)| chat | gemini
+# base_url = "https://example.invalid/v1"   # 默认同 [provider] base_url
+# api_key_ref = "provider_api_key" # 默认同 [provider] api_key_ref
+# context_window = 128000          # 默认同 [provider] context_window
+#
+# [[provider.fallbacks]]
+# model = "fallback-model-b"
+# wire_api = "gemini"
+# base_url = "https://example.invalid/v1beta"
 
 [storage]
 data_dir = "data"    # 相对本配置文件所在目录;运行时数据,不入库

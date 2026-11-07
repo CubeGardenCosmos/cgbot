@@ -38,6 +38,14 @@ max_edge = 1536                 # 长边上限(像素);超出缩小后重编码
 retention_images = 200          # 每个私聊/群范围最多保留的图片数
 retention_days = 30             # 图片保留天数
 
+# 有序降级(2026-11-07):主模型(上面的 model)失败后按此顺序依次尝试;每一轮对话都从主模型重新开始。
+# 触发条件:适配器自身的重试用尽后仍报错(429/5xx/超时/4xx)。流式输出一旦已产生内容就不再降级。
+# 省略的项继承 [provider];重试设置与 [provider.reasoning] 档位对所有成员一致。
+[[provider.fallbacks]]
+model = "gemini-3.8-flash"
+wire_api = "gemini"                            # Gemini 原生 generateContent,仅此一种线协议可用
+base_url = "https://api.cicori.com/v1beta"     # Gemini 原生接口根地址(注意不是 /v1)
+
 [storage]
 data_dir = "/app/data"   # 绝对路径,对应宿主机 /home/klp/cgbot-run/state
 

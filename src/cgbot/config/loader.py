@@ -15,9 +15,9 @@ from cgbot.config.settings import (
     DEFAULT_RETRY_ATTEMPTS,
     DEFAULT_RETRY_BACKOFF,
     SEARCH_ENGINE_NAMES,
-    WIRE_APIS,
     Config,
     ConfigError,
+    FallbackModelConfig,
     GroupConfig,
     LoggingConfig,
     NapCatConfig,
@@ -131,10 +131,7 @@ def _provider(t: _Table, source: _SecretSource) -> ProviderConfig:
     model = t.text("model")
     context_window = t.positive_int("context_window")
     api_key = source.resolve(t.text("api_key_ref"), t.key("api_key_ref"))
-    wire_text = t.text_or("wire_api", "responses")
-    if wire_text not in WIRE_APIS:
-        raise t.error("wire_api", "须为 responses 或 chat")
-    wire_api: WireApi = "chat" if wire_text == "chat" else "responses"
+    wire_api = _wire_api(t, "responses")
     retry_attempts = t.non_negative_int_or("retry_attempts", DEFAULT_RETRY_ATTEMPTS)
     retry_backoff = t.number_list_or("retry_backoff", DEFAULT_RETRY_BACKOFF)
 
@@ -148,6 +145,10 @@ def _provider(t: _Table, source: _SecretSource) -> ProviderConfig:
     )
     tiers.close()
     vision = _vision(t.sub("vision"))
+    fallbacks = tuple(
+        _fallback(item, source, base_url, api_key, context_window)
+        for item in t.table_array("fallbacks")
+    )
     t.close()
     return ProviderConfig(
         base_url=base_url,
@@ -159,6 +160,38 @@ def _provider(t: _Table, source: _SecretSource) -> ProviderConfig:
         retry_attempts=retry_attempts,
         retry_backoff=retry_backoff,
         vision=vision,
+        fallbacks=fallbacks,
+    )
+
+
+def _wire_api(t: _Table, default: WireApi) -> WireApi:
+    value = t.text_or("wire_api", default)
+    if value == "responses":
+        return "responses"
+    if value == "chat":
+        return "chat"
+    if value == "gemini":
+        return "gemini"
+    raise t.error("wire_api", "须为 responses、chat 或 gemini")
+
+
+def _fallback(
+    t: _Table, source: _SecretSource, base_url: str, api_key: Secret, context_window: int
+) -> FallbackModelConfig:
+    """``[[provider.fallbacks]]``: omitted keys inherit from ``[provider]``."""
+    model = t.text("model")
+    wire_api = _wire_api(t, "responses")
+    fb_base_url = t.http_url("base_url") if t.has("base_url") else base_url
+    key_ref = t.optional_text("api_key_ref")
+    fb_key = api_key if key_ref is None else source.resolve(key_ref, t.key("api_key_ref"))
+    fb_window = t.positive_int_or("context_window", context_window)
+    t.close()
+    return FallbackModelConfig(
+        model=model,
+        wire_api=wire_api,
+        base_url=fb_base_url,
+        api_key=fb_key,
+        context_window=fb_window,
     )
 
 
@@ -435,6 +468,18 @@ class _Table:
         if not isinstance(value, str) or not value.strip():
             raise self.error(name, "须为非空字符串")
         return value.strip()
+
+    def table_array(self, name: str) -> list[_Table]:
+        """``[[name]]`` array of tables, in file order; absent means empty."""
+        value = self._take(name)
+        if value is _MISSING:
+            return []
+        if not isinstance(value, list) or not all(isinstance(item, dict) for item in value):
+            raise self.error(name, "须为表数组([[...]])")
+        return [_Table(item, f"{self.key(name)}[{i}]") for i, item in enumerate(value)]
+
+    def has(self, name: str) -> bool:
+        return name in self._data
 
     def sub(self, name: str, *, required: bool = False) -> _Table:
         value = self._take(name)

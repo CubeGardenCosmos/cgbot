@@ -146,7 +146,7 @@ class HttpUpstream:
         self, stack: AsyncExitStack, request: ModelRequest, stream: bool
     ) -> httpx.Response:
         headers = {
-            "Authorization": f"Bearer {self._api_key}",
+            **self._auth_headers(),
             "Accept": "text/event-stream" if stream else "application/json",
         }
         body = self._body(request, stream=stream)
@@ -154,7 +154,7 @@ class HttpUpstream:
             resp = await stack.enter_async_context(
                 self._http.stream(
                     "POST",
-                    f"{self._base_url}{self._PATH}",
+                    self._url(stream),
                     json=body,
                     headers=headers,
                     timeout=self._timeout,
@@ -168,6 +168,12 @@ class HttpUpstream:
         except httpx.TransportError as exc:
             raise UpstreamUnavailable(f"upstream unreachable: {type(exc).__name__}") from exc
         return resp
+
+    def _url(self, stream: bool) -> str:
+        return f"{self._base_url}{self._PATH}"
+
+    def _auth_headers(self) -> dict[str, str]:
+        return {"Authorization": f"Bearer {self._api_key}"}
 
     def _retry_delay(self, attempt: int, exc: ProviderError) -> float:
         if isinstance(exc, RateLimited) and exc.retry_after is not None:

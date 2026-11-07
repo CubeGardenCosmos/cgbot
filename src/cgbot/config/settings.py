@@ -12,8 +12,8 @@ if TYPE_CHECKING:
     from cgbot.voice.config import VoiceConfig
 
 Scope = Literal["private", "group"]
-WireApi = Literal["responses", "chat"]
-WIRE_APIS: Final = ("responses", "chat")
+WireApi = Literal["responses", "chat", "gemini"]
+WIRE_APIS: Final = ("responses", "chat", "gemini")
 DEFAULT_TIMEZONE: Final = "Asia/Kuala_Lumpur"
 
 
@@ -113,8 +113,20 @@ DEFAULT_RETRY_BACKOFF: tuple[float, ...] = (2.0, 5.0)
 
 
 @dataclass(frozen=True, slots=True)
+class FallbackModelConfig:
+    """One ``[[provider.fallbacks]]`` entry, fully resolved (omitted keys already inherited from
+    ``[provider]``). Retry settings and reasoning tiers are always the primary's."""
+
+    model: str
+    wire_api: WireApi
+    base_url: str
+    api_key: Secret
+    context_window: int
+
+
+@dataclass(frozen=True, slots=True)
 class ProviderConfig:
-    """Single model provider; ``wire_api`` selects Responses or Chat Completions on the upstream."""
+    """Model provider; ``wire_api`` selects Responses, Chat Completions or native Gemini."""
 
     base_url: str
     model: str
@@ -125,6 +137,8 @@ class ProviderConfig:
     retry_attempts: int = DEFAULT_RETRY_ATTEMPTS  # extra tries after a transient failure
     retry_backoff: tuple[float, ...] = DEFAULT_RETRY_BACKOFF  # seconds before retry n; last repeats
     vision: VisionConfig = field(default_factory=lambda: VisionConfig())
+    # Tried in order after ``model`` fails (every turn restarts at ``model``).
+    fallbacks: tuple[FallbackModelConfig, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

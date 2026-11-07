@@ -439,7 +439,7 @@ def test_wire_api_defaults_to_responses(tmp_path: Path, secrets_file: Path) -> N
     assert cfg.provider.wire_api == "responses"
 
 
-@pytest.mark.parametrize("value", ["responses", "chat"])
+@pytest.mark.parametrize("value", ["responses", "chat", "gemini"])
 def test_wire_api_accepts_known_values(tmp_path: Path, secrets_file: Path, value: str) -> None:
     toml = edit(BASE_TOML, "model = ", f'wire_api = "{value}"\nmodel = ')
     cfg = load_with(tmp_path, toml, secrets_file)
@@ -451,6 +451,102 @@ def test_wire_api_unknown_value_is_named(tmp_path: Path, secrets_file: Path) -> 
     with pytest.raises(ConfigError) as info:
         load_with(tmp_path, toml, secrets_file)
     assert info.value.key == "provider.wire_api"
+
+
+# --- [[provider.fallbacks]] ---------------------------------------------------------------------
+
+
+def test_no_fallbacks_by_default(tmp_path: Path, secrets_file: Path) -> None:
+    assert load_with(tmp_path, BASE_TOML, secrets_file).provider.fallbacks == ()
+
+
+def test_fallback_defaults_inherit_from_provider(tmp_path: Path, secrets_file: Path) -> None:
+    toml = BASE_TOML + '\n[[provider.fallbacks]]\nmodel = "grok-4.7"\n'
+    cfg = load_with(tmp_path, toml, secrets_file)
+
+    (fb,) = cfg.provider.fallbacks
+    assert fb.model == "grok-4.7"
+    assert fb.wire_api == "responses"  # default, not the primary's wire_api
+    assert fb.base_url == "https://up.example/v1"
+    assert fb.api_key.reveal() == SECRET_VALUE
+    assert fb.context_window == 128000
+
+
+def test_fallback_wire_api_default_ignores_primary_wire_api(
+    tmp_path: Path, secrets_file: Path
+) -> None:
+    toml = edit(BASE_TOML, "model = ", 'wire_api = "chat"\nmodel = ')
+    toml += '\n[[provider.fallbacks]]\nmodel = "grok-4.7"\n'
+    assert load_with(tmp_path, toml, secrets_file).provider.fallbacks[0].wire_api == "responses"
+
+
+def test_fallbacks_keep_file_order_and_overrides(tmp_path: Path) -> None:
+    secrets = write(
+        tmp_path,
+        "s.toml",
+        f'[secrets]\nprovider_api_key = "{SECRET_VALUE}"\ngemini_key = "AIza-other"\n',
+    )
+    toml = (
+        BASE_TOML
+        + '\n[[provider.fallbacks]]\nmodel = "grok-4.7"\n'
+        + "\n[[provider.fallbacks]]\n"
+        + 'model = "gemini-3.8-flash"\n'
+        + 'wire_api = "gemini"\n'
+        + 'base_url = "https://g.example/v1beta"\n'
+        + 'api_key_ref = "gemini_key"\n'
+        + "context_window = 1000000\n"
+    )
+    cfg = load_with(tmp_path, toml, secrets)
+
+    first, second = cfg.provider.fallbacks
+    assert [first.model, second.model] == ["grok-4.7", "gemini-3.8-flash"]
+    assert second.wire_api == "gemini"
+    assert second.base_url == "https://g.example/v1beta"
+    assert second.api_key.reveal() == "AIza-other"
+    assert second.context_window == 1000000
+    assert first.api_key.reveal() == SECRET_VALUE
+    assert SECRET_VALUE not in repr(cfg.provider)
+
+
+@pytest.mark.parametrize(
+    ("body", "key"),
+    [
+        ('wire_api = "responses"', "provider.fallbacks[0].model"),
+        ('model = "m"\nretry_attempts = 1', "provider.fallbacks[0].retry_attempts"),
+        ('model = "m"\nbogus = 1', "provider.fallbacks[0].bogus"),
+        ('model = ""', "provider.fallbacks[0].model"),
+        ('model = "m"\nwire_api = "grpc"', "provider.fallbacks[0].wire_api"),
+        ('model = "m"\nbase_url = "ftp://x"', "provider.fallbacks[0].base_url"),
+        ('model = "m"\napi_key_ref = "missing_key"', "provider.fallbacks[0].api_key_ref"),
+        ('model = "m"\napi_key_ref = "Bad-Name"', "provider.fallbacks[0].api_key_ref"),
+        ('model = "m"\ncontext_window = 0', "provider.fallbacks[0].context_window"),
+    ],
+)
+def test_fallback_invalid_entries_are_named(
+    tmp_path: Path, secrets_file: Path, body: str, key: str
+) -> None:
+    toml = BASE_TOML + f"\n[[provider.fallbacks]]\n{body}\n"
+    with pytest.raises(ConfigError) as info:
+        load_with(tmp_path, toml, secrets_file)
+    assert info.value.key == key
+
+
+def test_fallbacks_must_be_an_array_of_tables(tmp_path: Path, secrets_file: Path) -> None:
+    toml = BASE_TOML + '\n[provider.fallbacks]\nmodel = "m"\n'
+    with pytest.raises(ConfigError) as info:
+        load_with(tmp_path, toml, secrets_file)
+    assert info.value.key == "provider.fallbacks"
+
+
+def test_second_fallback_error_reports_its_index(tmp_path: Path, secrets_file: Path) -> None:
+    toml = (
+        BASE_TOML
+        + '\n[[provider.fallbacks]]\nmodel = "a"\n'
+        + '\n[[provider.fallbacks]]\nmodel = "b"\nwire_api = "x"\n'
+    )
+    with pytest.raises(ConfigError) as info:
+        load_with(tmp_path, toml, secrets_file)
+    assert info.value.key == "provider.fallbacks[1].wire_api"
 
 
 def test_retry_defaults_and_overrides(tmp_path: Path, secrets_file: Path) -> None:
