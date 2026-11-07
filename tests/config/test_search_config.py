@@ -29,7 +29,6 @@ SECRETS = """
 provider_api_key = "sk-test-SEARCH"
 baidu_cookies = "BAIDUID=baidu-secret"
 bilibili_cookies = "buvid3=bili-secret"
-gemini_search_token = "relay-secret"
 """
 
 
@@ -54,7 +53,8 @@ def test_missing_search_section_uses_defaults(tmp_path: Path) -> None:
     assert search.baidu_cookies is None
     assert search.bilibili_cookies is None
     assert search.gemini.enabled is False
-    assert search.gemini.model == "gemini-2.5-flash"
+    assert search.gemini.model == "gemini-3.1-flash-lite"
+    assert search.gemini.timeout_seconds == 90.0
 
 
 def test_engines_subset_and_default_engine(tmp_path: Path) -> None:
@@ -78,23 +78,22 @@ def test_cookie_refs_resolve_through_secrets(tmp_path: Path) -> None:
     assert search.bilibili_cookies.reveal() == "buvid3=bili-secret"
 
 
-def test_gemini_enabled_requires_http_endpoint_and_token(tmp_path: Path) -> None:
+def test_gemini_enabled_reads_base_url_model_and_timeout(tmp_path: Path) -> None:
     search = _load(
         tmp_path,
-        '\n[search.gemini]\nenabled = true\nendpoint = "http://relay.example:8790/search"\n'
-        'token_ref = "gemini_search_token"\ntimeout_seconds = 45\n',
+        '\n[search.gemini]\nenabled = true\nbase_url = "https://relay.example/v1beta"\n'
+        'model = "gemini-other"\ntimeout_seconds = 45\n',
     ).search
     assert search.gemini.enabled is True
-    assert search.gemini.endpoint == "http://relay.example:8790/search"
-    assert search.gemini.token is not None
-    assert search.gemini.token.reveal() == "relay-secret"
+    assert search.gemini.base_url == "https://relay.example/v1beta"
+    assert search.gemini.model == "gemini-other"
     assert search.gemini.timeout_seconds == 45.0
 
 
-def test_gemini_disabled_needs_no_endpoint_or_token(tmp_path: Path) -> None:
+def test_gemini_disabled_needs_no_base_url(tmp_path: Path) -> None:
     gemini = _load(tmp_path, "\n[search.gemini]\nenabled = false\n").search.gemini
     assert gemini.enabled is False
-    assert gemini.token is None
+    assert gemini.base_url == ""
 
 
 @pytest.mark.parametrize(
@@ -104,9 +103,14 @@ def test_gemini_disabled_needs_no_endpoint_or_token(tmp_path: Path) -> None:
         "\n[search]\nengines = []\n",
         '\n[search]\nengines = ["bing"]\ndefault_engine = "baidu"\n',
         "\n[search]\ndefault_count = 20\nmax_count = 10\n",
-        '\n[search.gemini]\nenabled = true\nendpoint = "relay.example:8790"\n'
+        '\n[search.gemini]\nenabled = true\nbase_url = "relay.example/v1beta"\n',
+        "\n[search.gemini]\nenabled = true\n",
+        '\n[search.gemini]\nenabled = true\nbase_url = "https://relay.example/v1beta"\n'
+        "timeout_seconds = 0\n",
+        '\n[search.gemini]\nenabled = true\nendpoint = "http://relay.example:8790/search"\n'
+        'base_url = "https://relay.example/v1beta"\n',
+        '\n[search.gemini]\nenabled = true\nbase_url = "https://relay.example/v1beta"\n'
         'token_ref = "gemini_search_token"\n',
-        '\n[search.gemini]\nenabled = true\nendpoint = "http://relay.example:8790/search"\n',
         '\n[search]\nbaidu_cookies_ref = "no_such_secret"\n',
     ],
 )

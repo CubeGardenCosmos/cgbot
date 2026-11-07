@@ -96,10 +96,7 @@ deploy/deploy.sh --rollback <tag>   # 切换到已存在的 cgbot:<tag> 并重�
 - Docker 代理白名单是否满足 M5 manager 的全部调用(`/images/*`、logs、wait 未在旧 haproxy 白名单中)。
 - 容器内 `/healthz` 与 `bridge` 端到端路径未测,依赖 slice A/D/E。
 
-## 10. omp 搜索 relay(宿主机,未部署)
+## 10. Gemini 搜索
 
-`gemini_search` 工具的宿主机侧守护进程,安装与运维步骤见 [deploy/README.md](../../deploy/README.md) 的「omp 搜索 relay」一节。
-容器经 `host.docker.internal:8791/search` 访问,令牌只在 bot 进程内。
-
-- 仓库内只提供脚本与单元示例;在 192.168.1.19 上的安装与启用需人工执行,未在本次工作中执行。
-- 未验证项:真实 `omp search` 的 TUI 输出格式(当前解析器按 omp 渲染器源码与手工构造的样例测试);relay 在 .19 的实际运行。
+`gemini_search` 工具直接调用上游中转(`[search.gemini] base_url`,如 `https://api.cicori.com/v1beta`)的 Gemini `generateContent`,启用 `google_search` grounding;不再需要宿主机 relay(`omp-search-relay` 已移除)。
+bot 工具使用 `[provider] api_key`;沙盒桥(`/bridge/gemini-search`)使用 `[coding] upstream_api_key`,缺省回退 `[provider] api_key`。沙盒本身不持有任何密钥。

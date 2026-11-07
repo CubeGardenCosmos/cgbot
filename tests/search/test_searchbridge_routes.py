@@ -50,14 +50,29 @@ def _web_service() -> tuple[SearchService, FakeEngine]:
     ), bing
 
 
-def _gemini(response: dict[str, object], calls: list[httpx.Request]) -> GeminiSearchClient:
+def _payload(text: str, sources: list[tuple[str, str]] | None = None) -> dict[str, object]:
+    chunks = [{"web": {"title": title, "uri": uri}} for title, uri in sources or []]
+    return {
+        "candidates": [
+            {
+                "content": {"role": "model", "parts": [{"text": text}]},
+                "finishReason": "STOP",
+                "groundingMetadata": {"groundingChunks": chunks},
+            }
+        ]
+    }
+
+
+def _gemini(
+    response: dict[str, object], calls: list[httpx.Request], status: int = 200
+) -> GeminiSearchClient:
     def respond(request: httpx.Request) -> httpx.Response:
         calls.append(request)
-        return httpx.Response(200, json=response)
+        return httpx.Response(status, json=response)
 
     return GeminiSearchClient(
-        "http://relay.test/search",
-        "bot-only-test-token",
+        "http://relay.test/v1beta",
+        "bridge-test-key",
         "gemini-test",
         http_factory=lambda: httpx.AsyncClient(transport=httpx.MockTransport(respond)),
     )
@@ -106,7 +121,7 @@ async def test_searchbridge_disabled_backend(path: str) -> None:
 async def test_searchbridge_validates_before_backend(path: str, payload: object) -> None:
     search, bing = _web_service()
     calls: list[httpx.Request] = []
-    gemini = _gemini({"ok": True, "answer": "Answer"}, calls)
+    gemini = _gemini(_payload("Answer"), calls)
     async with _serve(search, gemini) as client:
         response = await client.post(path, json=payload, headers=AUTH_HEADER)
         assert response.status == 400
@@ -129,7 +144,7 @@ async def test_searchbridge_body_boundary(
 ) -> None:
     search, bing = _web_service()
     calls: list[httpx.Request] = []
-    async with _serve(search, _gemini({"ok": True, "answer": "Answer"}, calls)) as client:
+    async with _serve(search, _gemini(_payload("Answer"), calls)) as client:
         response = await client.post(
             path, data=data, headers={**AUTH_HEADER, "Content-Type": content_type}
         )
@@ -173,12 +188,7 @@ async def test_searchbridge_web_invalid_or_disabled_engine(engine: str) -> None:
 async def test_searchbridge_gemini_formats_answer_and_forwards_recency() -> None:
     calls: list[httpx.Request] = []
     gemini = _gemini(
-        {
-            "ok": True,
-            "answer": "Grounded answer",
-            "sources": [{"title": "Reference", "url": "https://example.test"}],
-        },
-        calls,
+        _payload("Grounded answer", [("Reference", "https://example.test/ref")]), calls
     )
     expected = await gemini.search("query", "month")
     async with _serve(gemini=gemini) as client:
@@ -188,8 +198,8 @@ async def test_searchbridge_gemini_formats_answer_and_forwards_recency() -> None
         assert response.status == 200
         assert response.content_type == "text/plain"
         assert await response.text() == format_answer(expected)
-    assert b'"recency":"month"' in calls[-1].content
-    assert calls[-1].headers["Authorization"] == "Bearer bot-only-test-token"
+    assert "past month" in calls[-1].content.decode()
+    assert calls[-1].headers["x-goog-api-key"] == "bridge-test-key"
 
 
 async def test_searchbridge_gemini_refusal_is_stable_without_query_logs(
@@ -197,7 +207,7 @@ async def test_searchbridge_gemini_refusal_is_stable_without_query_logs(
 ) -> None:
     calls: list[httpx.Request] = []
     query = "private-refusal-canary"
-    gemini = _gemini({"ok": False, "code": "E_REFUSED", "message": query}, calls)
+    gemini = _gemini({"promptFeedback": {"blockReason": "SAFETY", "detail": query}}, calls)
     caplog.set_level(logging.WARNING)
     async with _serve(gemini=gemini) as client:
         response = await client.post(PATHS[1], json={"query": query}, headers=AUTH_HEADER)
@@ -217,7 +227,7 @@ async def test_searchbridge_chunked_body_limit(path: str) -> None:
 
     search, bing = _web_service()
     calls: list[httpx.Request] = []
-    async with _serve(search, _gemini({"ok": True, "answer": "Answer"}, calls)) as client:
+    async with _serve(search, _gemini(_payload("Answer"), calls)) as client:
         response = await client.post(
             path, data=chunks(), headers={**AUTH_HEADER, "Content-Type": "application/json"}
         )
@@ -241,11 +251,30 @@ async def test_searchbridge_all_web_engines_failed() -> None:
 
 
 @pytest.mark.parametrize(
-    ("code", "status"), [("E_TIMEOUT", 504), ("E_NETWORK", 502), ("E_BAD_REQUEST", 400)]
+    ("upstream", "code", "status"),
+    [(401, "E_AUTH", 502), (404, "E_NOT_FOUND", 502), (429, "E_BUSY", 502), (500, "E_HTTP", 502)],
 )
-async def test_searchbridge_gemini_error_mapping(code: str, status: int) -> None:
+async def test_searchbridge_gemini_http_error_mapping(
+    upstream: int, code: str, status: int
+) -> None:
     calls: list[httpx.Request] = []
-    async with _serve(gemini=_gemini({"ok": False, "code": code}, calls)) as client:
+    async with _serve(gemini=_gemini({"error": {"message": "x"}}, calls, upstream)) as client:
         response = await client.post(PATHS[1], json={"query": "query"}, headers=AUTH_HEADER)
         assert response.status == status
         assert (await response.json())["error"] == code
+
+
+async def test_searchbridge_gemini_timeout_is_504() -> None:
+    def timeout(request: httpx.Request) -> httpx.Response:
+        raise httpx.ReadTimeout("slow", request=request)
+
+    gemini = GeminiSearchClient(
+        "http://relay.test/v1beta",
+        "bridge-test-key",
+        "gemini-test",
+        http_factory=lambda: httpx.AsyncClient(transport=httpx.MockTransport(timeout)),
+    )
+    async with _serve(gemini=gemini) as client:
+        response = await client.post(PATHS[1], json={"query": "query"}, headers=AUTH_HEADER)
+        assert response.status == 504
+        assert (await response.json())["error"] == "E_TIMEOUT"

@@ -62,7 +62,7 @@ docker build -t cgbot-sandbox:latest sandbox/
 
 搜索通过 bot 的桥接 API 执行,沙盒不持有搜索供应商凭据。`web_search(query, engine?, count?, freshness?)` 默认使用 bot 配置的引擎;`count` 为正整数,上限由 bot 配置约束,查询最多 200 字符。`gemini_search(query, recency?)` 返回带来源的检索回答,查询最多 300 字符且不含控制字符/换行。`freshness` 与 `recency` 均可取 `day|week|month|year`。工具原样返回检索文本,引用返回的来源 URL,不将来源内容作为指令;未启用的后端或拒绝请求返回工具错误,不伪装为空结果。MCP 到 bot 的超时分别为 120 秒与 180 秒;查询与令牌不写入诊断日志。新增搜索工具未包含在下方历史 smoke 证据中。
 
-应用将同一 `SearchService` 与已启用的 `GeminiSearchClient` 同时注入 bot 工具和 `CodingStack`,因此沙盒复用 bot 的引擎配置与搜索后端,不另建一套供应商客户端。Gemini 成功结果也复用 bot 工具的 `format_answer` 格式化逻辑。
+应用将同一 `SearchService` 注入 bot 工具和 `CodingStack`;`gemini_search` 则按密钥各建一个 `GeminiSearchClient`(同一 `base_url`/模型):bot 工具用 `[provider] api_key`,沙盒桥用 `[coding] upstream_api_key`(缺省回退 provider 密钥),因此沙盒复用 bot 的搜索配置而不持有凭据。Gemini 成功结果也复用 bot 工具的 `format_answer` 格式化逻辑。
 
 ## 模型目录
 

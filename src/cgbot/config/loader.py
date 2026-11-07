@@ -245,7 +245,7 @@ def _search(t: _Table, source: _SecretSource) -> SearchConfig:
         if bilibili_ref is None
         else source.resolve(bilibili_ref, t.key("bilibili_cookies_ref"))
     )
-    gemini = _search_gemini(t.sub("gemini"), source)
+    gemini = _search_gemini(t.sub("gemini"))
     t.close()
     return SearchConfig(
         engines=engines,
@@ -259,23 +259,17 @@ def _search(t: _Table, source: _SecretSource) -> SearchConfig:
     )
 
 
-def _search_gemini(t: _Table, source: _SecretSource) -> SearchGeminiConfig:
+def _search_gemini(t: _Table) -> SearchGeminiConfig:
     enabled = t.bool_or("enabled", False)
-    endpoint = t.text_or("endpoint", "")
-    model = t.text_or("model", "gemini-2.5-flash")
+    base_url = t.text_or("base_url", "")
+    model = t.text_or("model", "gemini-3.1-flash-lite")
     timeout_seconds = t.positive_number_or("timeout_seconds", 90.0)
-    token_ref = t.optional_text("token_ref")
-    token = None if token_ref is None else source.resolve(token_ref, t.key("token_ref"))
-    if enabled:
-        if not endpoint.startswith(("http://", "https://")):
-            raise t.error("endpoint", "启用时须以 http:// 或 https:// 开头")
-        if token is None:
-            raise t.error("token_ref", "启用时必须配置")
+    if enabled and not base_url.startswith(("http://", "https://")):
+        raise t.error("base_url", "启用时须以 http:// 或 https:// 开头")
     t.close()
     return SearchGeminiConfig(
         enabled=enabled,
-        endpoint=endpoint,
-        token=token,
+        base_url=base_url,
         model=model,
         timeout_seconds=timeout_seconds,
     )

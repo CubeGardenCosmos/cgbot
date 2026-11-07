@@ -264,16 +264,23 @@ class App:
         ] = {}  # per-session memory prompt snapshot (cache-stable)
         self._search = SearchService(config.search)
         self._gemini: GeminiSearchClient | None = None
+        self._coding_gemini: GeminiSearchClient | None = None
         gemini = config.search.gemini
         if gemini.enabled:
-            if gemini.token is None:
-                raise ValueError("[search.gemini] token_ref is required when enabled")
+            # 同一上游中转、同一模型;bot 与沙盒桥各用自己的密钥(沙盒桥规则同 CodingStack 上游密钥)。
             self._gemini = GeminiSearchClient(
-                gemini.endpoint,
-                gemini.token.reveal(),
+                gemini.base_url,
+                config.provider.api_key.reveal(),
                 gemini.model,
                 gemini.timeout_seconds,
             )
+            if config.coding is not None:
+                self._coding_gemini = GeminiSearchClient(
+                    gemini.base_url,
+                    (config.coding.upstream_api_key or config.provider.api_key).reveal(),
+                    gemini.model,
+                    gemini.timeout_seconds,
+                )
         # omp (ompweb) control plane: state lives in its own SQLite file; wakes re-enter privately.
         self._omp_store = OmpStore(storage.for_module("omp"))
         self._omp = OmpService(
@@ -317,7 +324,7 @@ class App:
                 ),
                 queue_path=storage.for_module("coding"),
                 search_service=self._search,
-                gemini_client=self._gemini,
+                gemini_client=self._coding_gemini,
             )
             if config.coding is not None
             else None

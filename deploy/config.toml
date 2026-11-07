@@ -60,10 +60,9 @@ engines = ["bing", "baidu", "bilibili"]
 timeout_seconds = 30
 
 [search.gemini]
-enabled = true                            # 宿主机 omp-search-relay(systemd 用户服务,端口 8791)
-endpoint = "http://host.docker.internal:8791/search"
-token_ref = "gemini_search_token"
-model = "gemini-2.5-flash"
+enabled = true                            # 直接调用上游中转的 Gemini generateContent(google_search)
+base_url = "https://api.cicori.com/v1beta"
+model = "gemini-3.1-flash-lite"
 
 [logging]
 level = "INFO"

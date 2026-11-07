@@ -137,12 +137,12 @@ timezone = "Asia/Kuala_Lumpur"  # IANA 时区名;群门控的本地小时(睡眠
 # baidu_cookies_ref = "baidu_cookies"       # 可选;secrets 中的名称,值为浏览器 Cookie 串
 # bilibili_cookies_ref = "bilibili_cookies" # 可选;建议包含 buvid3
 #
-# [search.gemini]                           # 默认关闭;需宿主机 omp-search-relay 可达
+# [search.gemini]                           # 默认关闭;直接调用上游中转的 Gemini generateContent(google_search)
 # enabled = false
-# endpoint = "http://<宿主机地址>:<端口>/search"   # 与 omp-search-relay 的监听地址一致
-# token_ref = "gemini_search_token"         # 启用时必填
-# model = "gemini-2.5-flash"
+# base_url = "https://api.cicori.com/v1beta"   # 启用时必填;请求 {base_url}/models/{model}:generateContent
+# model = "gemini-3.1-flash-lite"
 # timeout_seconds = 90
+# 无独立密钥:bot 使用 [provider] api_key;沙盒桥使用 [coding] upstream_api_key(缺省回退 provider 密钥)
 
 [logging]
 level = "INFO"       # DEBUG / INFO / WARNING / ERROR / CRITICAL

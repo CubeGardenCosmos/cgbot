@@ -157,7 +157,7 @@ async def test_search_routes_receive_shared_services_and_sandbox_auth(
     parts = _install(monkeypatch, [])
     service = SearchService(SearchConfig()) if enabled else None
     gemini = (
-        GeminiSearchClient("https://relay.example/search", "test-token", "gemini-2.5-flash")
+        GeminiSearchClient("https://relay.example/v1beta", "test-key", "gemini-test")
         if enabled
         else None
     )

@@ -7,9 +7,10 @@ from typing import Any, cast
 from search_fakes import FakeEngine, hit
 
 from cgbot.agent.tools import ToolContext, ToolResult, ToolSpec
-from cgbot.config.settings import SearchConfig, SearchGeminiConfig
+from cgbot.config.settings import SearchConfig
 from cgbot.search import SearchService, search_tools
 from cgbot.search.engines import EngineError
+from cgbot.search.gemini import GeminiSearchClient
 from cgbot.search.models import E_BAIDU_BLOCKED, E_HTTP, SearchOutcome
 from cgbot.search.tools import format_outcome
 
@@ -113,27 +114,13 @@ def test_format_outcome_reports_partial_engine_failures() -> None:
     assert "百度" in text
 
 
-def test_gemini_tool_is_appended_only_when_enabled() -> None:
-    calls: list[SearchGeminiConfig] = []
+def test_gemini_tool_and_hint_are_present_only_with_a_client() -> None:
+    service = _service(bing=FakeEngine("bing"))
+    without = search_tools(service)
+    assert [spec.name for spec in without] == ["web_search"]
+    assert "gemini_search" not in without[0].description
 
-    def factory(cfg: SearchGeminiConfig) -> ToolSpec:
-        calls.append(cfg)
-        return ToolSpec(
-            name="gemini_search",
-            description="gemini",
-            parameters_schema={"type": "object", "properties": {}},
-            handler=_gemini_noop,
-        )
-
-    disabled = search_tools(_service(bing=FakeEngine("bing")), gemini_factory=factory)
-    assert [spec.name for spec in disabled] == ["web_search"]
-    assert calls == []
-
-    gemini = SearchGeminiConfig(enabled=True, endpoint="https://relay.example/search", token=None)
-    enabled = search_tools(_service(bing=FakeEngine("bing"), gemini=gemini), gemini_factory=factory)
-    assert [spec.name for spec in enabled] == ["web_search", "gemini_search"]
-    assert calls == [gemini]
-
-
-async def _gemini_noop(ctx: ToolContext, args: dict[str, Any]) -> ToolResult:
-    return ToolResult(output="")
+    client = GeminiSearchClient("https://relay.example/v1beta", "test-key", "gemini-test")
+    with_client = search_tools(service, gemini_client=client)
+    assert [spec.name for spec in with_client] == ["web_search", "gemini_search"]
+    assert "gemini_search" in with_client[0].description

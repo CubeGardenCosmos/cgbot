@@ -190,12 +190,15 @@ SEARCH_ENGINE_NAMES: Final = ("bing", "baidu", "bilibili")
 
 @dataclass(frozen=True, slots=True)
 class SearchGeminiConfig:
-    """``[search.gemini]``: Gemini search through the host relay (disabled by default)."""
+    """``[search.gemini]``: Gemini google_search grounding via the upstream relay (off by default).
+
+    No dedicated secret: the bot uses ``[provider] api_key``, the sandbox bridge uses
+    ``[coding] upstream_api_key`` (falling back to the provider key).
+    """
 
     enabled: bool = False
-    endpoint: str = ""
-    token: Secret | None = None
-    model: str = "gemini-2.5-flash"
+    base_url: str = ""
+    model: str = "gemini-3.1-flash-lite"
     timeout_seconds: float = 90.0
 
 

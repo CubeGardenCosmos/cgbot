@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from pathlib import Path
+from typing import Any
 
 import pytest
 from omp_fakes import quiet_watchers
@@ -22,7 +23,7 @@ from test_app import (
 import cgbot.app as app_module
 from cgbot.agent.tools import ToolSpec
 from cgbot.app import App
-from cgbot.config.settings import SearchGeminiConfig, Secret
+from cgbot.config.settings import SearchGeminiConfig
 from cgbot.search import SearchService, search_tools
 from cgbot.search.gemini import GeminiSearchClient
 
@@ -67,7 +68,7 @@ async def test_stop_closes_the_search_service(
     assert closed == [True]
 
 
-async def test_enabled_gemini_client_is_shared_with_search_tools(
+async def test_enabled_gemini_client_uses_provider_key_and_is_shared_with_search_tools(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     quiet_watchers(monkeypatch)
@@ -78,11 +79,20 @@ async def test_enabled_gemini_client_is_shared_with_search_tools(
             config.search,
             gemini=SearchGeminiConfig(
                 enabled=True,
-                endpoint="https://relay.example/search",
-                token=Secret("test-gemini-token"),
+                base_url="https://relay.example/v1beta",
+                model="gemini-test",
+                timeout_seconds=12.0,
             ),
         ),
     )
+    built: list[tuple[object, ...]] = []
+
+    class RecordingClient(GeminiSearchClient):
+        def __init__(self, *args: Any) -> None:
+            built.append(args)
+            super().__init__(*args)
+
+    monkeypatch.setattr(app_module, "GeminiSearchClient", RecordingClient)
     received: list[tuple[SearchService, GeminiSearchClient | None]] = []
 
     def tools(
@@ -100,8 +110,9 @@ async def test_enabled_gemini_client_is_shared_with_search_tools(
     await app.handle_message(private_msg("m1", IN_SCOPE, "你好"))
     await settle(app, clock)
 
+    assert built == [("https://relay.example/v1beta", "sk-test-APP", "gemini-test", 12.0)]
     assert received == [(app._search, app._gemini)]  # noqa: SLF001 - wiring under test
-    assert isinstance(received[0][1], GeminiSearchClient)
+    assert isinstance(received[0][1], RecordingClient)
     offered = {tool["name"] for tool in provider.requests[0].tools}
     assert {"web_search", "gemini_search"} <= offered
     await app.stop()
