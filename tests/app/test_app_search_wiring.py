@@ -23,9 +23,10 @@ from test_app import (
 import cgbot.app as app_module
 from cgbot.agent.tools import ToolSpec
 from cgbot.app import App
-from cgbot.config.settings import SearchGeminiConfig
+from cgbot.config.settings import SearchGeminiConfig, SearchXConfig
 from cgbot.search import SearchService, search_tools
 from cgbot.search.gemini import GeminiSearchClient
+from cgbot.search.xsearch import XSearchService
 
 
 def _app(tmp_path: Path, provider: ScriptedProvider, clock: FakeTimebase) -> App:
@@ -48,6 +49,31 @@ async def test_web_search_is_offered_to_private_turns(
     offered = {tool["name"] for tool in provider.requests[0].tools}
     assert "web_search" in offered
     assert "gemini_search" not in offered  # [search.gemini] is disabled by default
+    await app.stop()
+
+
+async def test_x_search_offered_only_when_enabled(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    quiet_watchers(monkeypatch)
+    clock = FakeTimebase()
+    provider = ScriptedProvider(text_resp("好"))
+    base = make_config(tmp_path)
+    config = replace(
+        base,
+        search=replace(
+            base.search, x=SearchXConfig(enabled=True, base_url="https://relay.example/v1")
+        ),
+    )
+    app = App(config, provider, timebase=clock)
+    install(app, Recorder())
+
+    await app.handle_message(private_msg("m1", IN_SCOPE, "你好"))
+    await settle(app, clock)
+
+    offered = {tool["name"] for tool in provider.requests[0].tools}
+    assert "x_search" in offered
+    assert "gemini_search" not in offered  # no Gemini fallback when [search.gemini] is off
     await app.stop()
 
 
@@ -96,10 +122,13 @@ async def test_enabled_gemini_client_uses_provider_key_and_is_shared_with_search
     received: list[tuple[SearchService, GeminiSearchClient | None]] = []
 
     def tools(
-        service: SearchService, *, gemini_client: GeminiSearchClient | None = None
+        service: SearchService,
+        *,
+        gemini_client: GeminiSearchClient | None = None,
+        x_service: XSearchService | None = None,
     ) -> list[ToolSpec]:
         received.append((service, gemini_client))
-        return search_tools(service, gemini_client=gemini_client)
+        return search_tools(service, gemini_client=gemini_client, x_service=x_service)
 
     monkeypatch.setattr(app_module, "search_tools", tools)
     clock = FakeTimebase()

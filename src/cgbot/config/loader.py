@@ -26,6 +26,7 @@ from cgbot.config.settings import (
     ScopeConfig,
     SearchConfig,
     SearchGeminiConfig,
+    SearchXConfig,
     Secret,
     StoragePaths,
     VisionConfig,
@@ -279,6 +280,7 @@ def _search(t: _Table, source: _SecretSource) -> SearchConfig:
         else source.resolve(bilibili_ref, t.key("bilibili_cookies_ref"))
     )
     gemini = _search_gemini(t.sub("gemini"))
+    x = _search_x(t.sub("x"))
     t.close()
     return SearchConfig(
         engines=engines,
@@ -289,6 +291,7 @@ def _search(t: _Table, source: _SecretSource) -> SearchConfig:
         baidu_cookies=baidu_cookies,
         bilibili_cookies=bilibili_cookies,
         gemini=gemini,
+        x=x,
     )
 
 
@@ -301,6 +304,22 @@ def _search_gemini(t: _Table) -> SearchGeminiConfig:
         raise t.error("base_url", "启用时须以 http:// 或 https:// 开头")
     t.close()
     return SearchGeminiConfig(
+        enabled=enabled,
+        base_url=base_url,
+        model=model,
+        timeout_seconds=timeout_seconds,
+    )
+
+
+def _search_x(t: _Table) -> SearchXConfig:
+    enabled = t.bool_or("enabled", False)
+    base_url = t.text_or("base_url", "")
+    model = t.text_or("model", "grok-4.7")
+    timeout_seconds = t.positive_number_or("timeout_seconds", 90.0)
+    if enabled and not base_url.startswith(("http://", "https://")):
+        raise t.error("base_url", "启用时须以 http:// 或 https:// 开头")
+    t.close()
+    return SearchXConfig(
         enabled=enabled,
         base_url=base_url,
         model=model,

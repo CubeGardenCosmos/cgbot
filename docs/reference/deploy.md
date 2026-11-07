@@ -101,3 +101,5 @@ deploy/deploy.sh --rollback <tag>   # 切换到已存在的 cgbot:<tag> 并重�
 
 `gemini_search` 工具直接调用上游中转(`[search.gemini] base_url`,如 `https://api.cicori.com/v1beta`)的 Gemini `generateContent`,启用 `google_search` grounding;不再需要宿主机 relay(`omp-search-relay` 已移除)。
 bot 工具使用 `[provider] api_key`;沙盒桥(`/bridge/gemini-search`)使用 `[coding] upstream_api_key`,缺省回退 `[provider] api_key`。沙盒本身不持有任何密钥。
+
+`x_search` 工具(仅 bot,不进沙盒搜索桥)优先调用 `[search.x] base_url`(如 `https://api.cicori.com/v1`)的 Responses `POST /responses`,使用 grok 原生 `x_search`(`recency` 换算为 `from_date`),密钥为 `[provider] api_key`。Grok 报错(除参数无效/安全拒绝外)或上游未实际执行搜索(`usage.num_server_side_tools_used` 为 0 且无 `url_citation`,错误码 `E_NOT_SEARCHED`)时,若 `[search.gemini]` 已启用则回退到限定 X 的 Gemini 搜索(结果头注明非实时、链接为跳转链接);Gemini 未启用则不回退,直接报错。2026-11-07 起 CLIProxyAPI 会剥离 `x_search` 工具,实际走 Gemini 回退。

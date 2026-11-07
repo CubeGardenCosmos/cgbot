@@ -52,6 +52,7 @@ from cgbot.provider.tiers import effort_for
 from cgbot.scheduler import KIND_COMPACTION_IDLE, Scheduler, SystemEvent
 from cgbot.search import SearchService, search_tools
 from cgbot.search.gemini import GeminiSearchClient
+from cgbot.search.xsearch import GrokXSearchClient, XSearchService
 from cgbot.session import AsyncSessionStore
 from cgbot.timefmt import time_instruction
 from cgbot.vision import build_vision, segment_image_urls
@@ -281,6 +282,19 @@ class App:
                     gemini.model,
                     gemini.timeout_seconds,
                 )
+        self._x_search: XSearchService | None = None
+        x = config.search.x
+        if x.enabled:
+            # Grok 原生 x_search 为主;[search.gemini] 启用时回退到 bot 自己的 Gemini 客户端。
+            self._x_search = XSearchService(
+                GrokXSearchClient(
+                    x.base_url,
+                    config.provider.api_key.reveal(),
+                    x.model,
+                    x.timeout_seconds,
+                ),
+                self._gemini,
+            )
         # omp (ompweb) control plane: state lives in its own SQLite file; wakes re-enter privately.
         self._omp_store = OmpStore(storage.for_module("omp"))
         self._omp = OmpService(
@@ -339,7 +353,9 @@ class App:
         registry = builtin_tools()
         for spec in memory_tools(self._memory):
             registry.register(spec)
-        for spec in search_tools(self._search, gemini_client=self._gemini):
+        for spec in search_tools(
+            self._search, gemini_client=self._gemini, x_service=self._x_search
+        ):
             registry.register(spec)
         registry.register(meme_lookup_tool(self._memes))
         if self._voice is not None:

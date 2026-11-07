@@ -159,6 +159,13 @@ timezone = "Asia/Kuala_Lumpur"  # IANA 时区名;群门控的本地小时(睡眠
 # model = "gemini-3.1-flash-lite"
 # timeout_seconds = 90
 # 无独立密钥:bot 使用 [provider] api_key;沙盒桥使用 [coding] upstream_api_key(缺省回退 provider 密钥)
+#
+# [search.x]                                # 默认关闭;x_search 工具:grok 原生 x_search(Responses API)搜索 X 平台
+# enabled = false
+# base_url = "https://api.cicori.com/v1"       # 启用时必填;请求 {base_url}/responses
+# model = "grok-4.7"
+# timeout_seconds = 90
+# 密钥同 [provider] api_key;Grok 失败或未实际搜索时,若 [search.gemini] 已启用则回退到限定 X 的 Gemini 搜索
 
 [logging]
 level = "INFO"       # DEBUG / INFO / WARNING / ERROR / CRITICAL

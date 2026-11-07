@@ -72,6 +72,12 @@ enabled = true                            # 直接调用上游中转的 Gemini g
 base_url = "https://api.cicori.com/v1beta"
 model = "gemini-3.1-flash-lite"
 
+[search.x]
+enabled = true                            # x_search 工具:grok 原生 x_search(Responses API)搜索 X 平台
+base_url = "https://api.cicori.com/v1"
+model = "grok-4.7"
+# 2026-11-07:CLIProxyAPI 目前会剥离 x_search 工具(上游不执行搜索),因此实际回退到限定 X 的 Gemini 搜索;修复后自动改用 Grok。
+
 [logging]
 level = "INFO"
 

@@ -217,6 +217,20 @@ class SearchGeminiConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class SearchXConfig:
+    """``[search.x]``: X platform search via grok ``x_search`` (Responses API; off by default).
+
+    Falls back to Gemini (X-restricted) when ``[search.gemini]`` is enabled. No dedicated secret:
+    the bot uses ``[provider] api_key``.
+    """
+
+    enabled: bool = False
+    base_url: str = ""
+    model: str = "grok-4.7"
+    timeout_seconds: float = 90.0
+
+
+@dataclass(frozen=True, slots=True)
 class SearchConfig:
     """``[search]``: web search engines and limits. Cookies are optional secret refs."""
 
@@ -228,6 +242,7 @@ class SearchConfig:
     baidu_cookies: Secret | None = None
     bilibili_cookies: Secret | None = None
     gemini: SearchGeminiConfig = field(default_factory=lambda: SearchGeminiConfig())
+    x: SearchXConfig = field(default_factory=lambda: SearchXConfig())
 
 
 @dataclass(frozen=True, slots=True)

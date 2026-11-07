@@ -1,4 +1,4 @@
-"""Model-callable web search tools: ``web_search`` plus, when enabled, ``gemini_search``.
+"""Model-callable search tools: ``web_search`` plus, when enabled, ``gemini_search``/``x_search``.
 
 Arguments are validated against the schema here (unknown keys rejected, count and freshness
 bounded) before reaching :class:`SearchService`. Results are rendered as short Chinese text lines;
@@ -28,6 +28,7 @@ from cgbot.search.models import (
     SearchOutcome,
 )
 from cgbot.search.service import ENGINE_LABELS, MAX_QUERY_CHARS, SearchService
+from cgbot.search.xsearch import XSearchService, x_search_tool
 
 MAX_SNIPPET_CHARS = 200
 
@@ -108,14 +109,17 @@ _GEMINI_HINT = (
     "另有 gemini_search（Google 来源的 AI 搜索）：本工具结果不足，或需要英文、国际、"
     "权威来源时可改用它。"
 )
+_X_HINT = "查 X（推特）上的帖子或讨论请用 x_search，不要用本工具。"
 
 
-def web_search_tool(service: SearchService, *, with_gemini: bool) -> ToolSpec:
+def web_search_tool(service: SearchService, *, with_gemini: bool, with_x: bool = False) -> ToolSpec:
     """The ``web_search`` tool bound to ``service``; schema lists only enabled engines."""
     config = service.config
     engines = list(service.engine_names)
     allowed = {"query", "engine", "count", "freshness"}
     description = _WEB_SEARCH_DESCRIPTION + (f" {_GEMINI_HINT}" if with_gemini else "")
+    if with_x:
+        description += f" {_X_HINT}"
 
     async def handler(ctx: ToolContext, args: dict[str, Any]) -> ToolResult:
         if (refused := _unknown_args(args, allowed)) is not None:
@@ -177,10 +181,19 @@ def web_search_tool(service: SearchService, *, with_gemini: bool) -> ToolSpec:
 
 
 def search_tools(
-    service: SearchService, *, gemini_client: GeminiSearchClient | None = None
+    service: SearchService,
+    *,
+    gemini_client: GeminiSearchClient | None = None,
+    x_service: XSearchService | None = None,
 ) -> list[ToolSpec]:
-    """``web_search`` plus ``gemini_search`` when a Gemini client is supplied."""
-    specs = [web_search_tool(service, with_gemini=gemini_client is not None)]
+    """``web_search`` plus ``gemini_search`` / ``x_search`` when their backends are supplied."""
+    specs = [
+        web_search_tool(
+            service, with_gemini=gemini_client is not None, with_x=x_service is not None
+        )
+    ]
     if gemini_client is not None:
         specs.append(gemini_search_tool(gemini_client))
+    if x_service is not None:
+        specs.append(x_search_tool(x_service))
     return specs

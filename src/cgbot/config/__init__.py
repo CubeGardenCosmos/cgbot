@@ -23,6 +23,11 @@ File format (see ``config.example.toml`` at the repo root for a commented copy):
   holds one SQLite file per domain: ``profile.sqlite`` (identity/channels), ``sessions.sqlite``
   (chat records), ``scheduler.sqlite``, and ``<module>.sqlite`` for later modules.
 - ``[group]``: ``wake_keywords`` (default ``["大肥鱼"]``), ``mute_keywords`` (default empty).
+- ``[search]``: web engines and limits; ``[search.gemini]`` (``enabled`` default false,
+  ``base_url`` required http(s) when enabled, ``model``, ``timeout_seconds`` 90) enables
+  ``gemini_search``; ``[search.x]`` (same keys, ``model`` default ``grok-4.7``) enables
+  ``x_search`` (grok native X search, falling back to Gemini when ``[search.gemini]`` is on).
+  Both use ``[provider] api_key`` for the bot.
 - ``[logging]``: ``level`` (default ``INFO``).
 
 Secrets: the config only names them. Values come from the secrets TOML ``[secrets]`` table

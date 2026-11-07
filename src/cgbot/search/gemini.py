@@ -120,17 +120,19 @@ def _strip_delimiters(text: str) -> str:
         text = stripped
 
 
-def _user_text(query: str, recency: str | None) -> str:
+def _user_text(query: str, recency: str | None, site_hint: str | None = None) -> str:
     lines = [QUERY_OPEN, query, QUERY_CLOSE]
     if recency is not None:
         lines.append(f"Prefer sources published within the {_RECENCY_LINES[recency]}.")
+    if site_hint is not None:
+        lines.append(site_hint)
     return "\n".join(lines)
 
 
-def _request_body(query: str, recency: str | None) -> dict[str, Any]:
+def _request_body(query: str, recency: str | None, site_hint: str | None = None) -> dict[str, Any]:
     return {
         "systemInstruction": {"parts": [{"text": SAFETY_PREAMBLE}]},
-        "contents": [{"role": "user", "parts": [{"text": _user_text(query, recency)}]}],
+        "contents": [{"role": "user", "parts": [{"text": _user_text(query, recency, site_hint)}]}],
         "tools": [{"google_search": {}}],
     }
 
@@ -166,7 +168,10 @@ class GeminiSearchClient:
     def model(self) -> str:
         return self._model
 
-    async def search(self, query: str, recency: str | None = None) -> GeminiAnswer:
+    async def search(
+        self, query: str, recency: str | None = None, *, site_hint: str | None = None
+    ) -> GeminiAnswer:
+        """``site_hint``: fixed caller-controlled English line (never user text) after the query."""
         text = _valid_query(query)
         if text is None:
             return _fail("E_BAD_QUERY")
@@ -175,7 +180,7 @@ class GeminiSearchClient:
         text = _strip_delimiters(text)
         if not text:
             return _fail("E_BAD_QUERY")
-        body = _request_body(text, recency)
+        body = _request_body(text, recency, site_hint)
         headers = {"x-goog-api-key": self._api_key}
         try:
             async with self._http_factory() as client:
@@ -273,11 +278,14 @@ def _interpret(response: httpx.Response) -> GeminiAnswer:
     return GeminiAnswer(ok=True, answer=answer, sources=_parse_sources(candidate))
 
 
-def format_answer(result: GeminiAnswer) -> str:
+GEMINI_HEADER = "Google 来源的 AI 搜索结果。"
+
+
+def format_answer(result: GeminiAnswer, header: str = GEMINI_HEADER) -> str:
     answer = result.answer
     if len(answer) > MAX_ANSWER_CHARS:
         answer = answer[:MAX_ANSWER_CHARS] + "…"
-    lines = ["Google 来源的 AI 搜索结果。", "回答:", answer]
+    lines = [header, "回答:", answer]
     if result.sources:
         lines.append("来源:")
         for index, source in enumerate(result.sources[:MAX_SOURCES_SHOWN], start=1):
