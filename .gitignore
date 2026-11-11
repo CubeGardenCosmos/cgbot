@@ -1,9 +1,53 @@
+# Python
 .venv/
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+.eggs/
+build/
+dist/
 .pytest_cache/
 .ruff_cache/
-data/
+.mypy_cache/
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
 secrets*
+*.secret
+*.key
+*.pem
+
+# Data and state
+data/
+state/
+run/
 *.sqlite*
+*.db
+*.db-journal
+
+# Backups and logs
 *.bak*
+*.log
+logs/
+*.log.*
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Project specific
+cgbot-data/
+cgbot-run/
+cgbot-build/

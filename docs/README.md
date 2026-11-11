@@ -1,6 +1,6 @@
 # cgbot 文档库
 
-更新日期:2026-10-30。项目处于文档阶段,没有代码。
+更新日期:2026-11-11。核心框架已实现(M1),功能开发进行中。
 
 ## 从哪里开始
 
@@ -11,6 +11,10 @@
 | 每个阶段由哪些能力组成 | [Roadmap 索引](ROADMAP.md) |
 | 当前具体任务与实施顺序 | [TODO 索引](todos/README.md) |
 | 仓库规范、硬约束与原子化提交 | [AGENTS.md](../AGENTS.md) |
+| 部署指南 | [部署参考](reference/deploy.md) |
+| 角色卡语法与配置 | [角色卡参考](reference/character-card.md) |
+| 容器栈配置 | [caged/README.md](../caged/README.md) |
+| 许可证 | [LICENSE](../LICENSE) |
 
 ## 文档如何维护
 

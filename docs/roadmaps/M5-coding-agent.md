@@ -1,15 +1,15 @@
 # M5 Coding Agent Roadmap
 
-目标:以常驻 Codex app-server 替代 DSH,提供每用户默认 Coding Agent、线程管理、排队、进度与附件回报,并保留单独的 omp_* 关联入口。默认 Agent 不限用途。依据:DESIGN.md §13.1、§13.3–§13.7;后续决议覆盖旧调研与推论。
+目标:以常驻 Codex app-server 替代 legacy,提供每用户默认 Coding Agent、线程管理、排队、进度与附件回报,并保留单独的 omp_* 关联入口。默认 Agent 不限用途。依据:DESIGN.md §13.1、§13.3–§13.7;后续决议覆盖旧调研与推论。
 
 所属:[M5](../MILESTONE.md)。状态:待决策。能力归属:R5.1 为 gateway,R5.2/R5.6 为沙盒,R5.3 为 manager,R5.4/R5.7 为框架工具,R5.5 为回报桥接;实施负责人待分配。
 
 | 编号 | 能力 | 依赖 | 验收条件 | 状态 | TODO 链接 |
 | --- | --- | --- | --- | --- | --- |
 | R5.1 | gateway Responses 薄透传 | R0.1 上游验证、R0.2、R1.5 供应商约定 | Codex 经 gateway 使用原生 Responses;校验内部令牌、注入真实密钥,不翻译协议 | 待决策 | [TODO](../todos/R5.1-gateway-responses.md) |
-| R5.2 | 沙盒镜像与 Codex app-server | R5.1、R1.3、R0.2 | 默认 YOLO 常驻服务,插件/SKILLS/软件包预装;DSH 与旧桥接/NDJSON 依赖移除 | 待决策 | [TODO](../todos/R5.2-sandbox-image-codex.md) |
+| R5.2 | 沙盒镜像与 Codex app-server | R5.1、R1.3、R0.2 | 默认 YOLO 常驻服务,插件/SKILLS/软件包预装;legacy 与旧桥接/NDJSON 依赖移除 | 待决策 | [TODO](../todos/R5.2-sandbox-image-codex.md) |
 | R5.3 | manager 线程、队列与并发 | R5.2、R1.3、R1.7 | 每 thread 忙时 FIFO 排队,stop 可清队列;每用户并发 4,全局降级为 1 与恢复符合已定阈值 | 待决策 | [TODO](../todos/R5.3-manager-threads-queue-concurrency.md) |
-| R5.4 | codex_* 工具 | R1.6、R5.3、R5.5 回报接口 | 独立工具族替代 DSH task 工具族,用户能管理线程;不保留 DSH 兼容层或统一后端工具层 | 待决策 | [TODO](../todos/R5.4-codex-tools.md) |
+| R5.4 | codex_* 工具 | R1.6、R5.3、R5.5 回报接口 | 独立工具族替代 legacy task 工具族,用户能管理线程;不保留 legacy 兼容层或统一后端工具层 | 待决策 | [TODO](../todos/R5.4-codex-tools.md) |
 | R5.5 | 回报桥接与大文件 | R5.2、R1.2、R1.6、R1.7;与 R5.3 联调 | report_progress 风格;单文件 512MB、2MB 切块、全链路流式,超限拒绝,临时文件可清理 | 待决策 | [TODO](../todos/R5.5-bridge-large-binary.md) |
 | R5.6 | Playwright 登录态与 Codex 子代理 | R5.2、R5.3 | 登录态每用户独立、主目录持久化、重建保留;框架不限制 Codex 子代理深度/并发 | 待决策 | [TODO](../todos/R5.6-playwright-subagents.md) |
 | R5.7 | omp_* 工具 | R1.3、R1.6、R1.7 | omp_add 式私聊录入与独立工具族;保留自身队列、账户额度、模糊目录解析 | 待决策 | [TODO](../todos/R5.7-omp-tools.md) |
@@ -27,6 +27,6 @@
 ## 与其他阶段的接口
 
 - M0 收束上游与工程参数;M1 提供供应商、身份、Agent 工具执行及系统事件队列;M2 决定被后台事件唤醒后的私聊处理。M5 不自行定义通知到最常用入口的统计口径,该能力后置。
-- §13.7 已定覆盖 §8 的旧“manager/沙盒本体不动”表述:可复用 DSH 无关的容器生命周期、计划任务、gateway、egress、用户卷布局;必须替换 DSH、dsh-plugin-bot-bridge、DSH NDJSON 解析。复用是候选,不代表已检查可直接运行或无需改造。
-- codex_* 与 omp_* 分开;不把 Codex 默认 Agent 限定为新闻采集,不恢复 DSH task 别名。计划任务仅沿用 manager 方向,任务规划尚未设计。
+- §13.7 已定覆盖 §8 的旧“manager/沙盒本体不动”表述:可复用 legacy 无关的容器生命周期、计划任务、gateway、egress、用户卷布局;必须替换 legacy、legacy-plugin-bot-bridge、legacy NDJSON 解析。复用是候选,不代表已检查可直接运行或无需改造。
+- codex_* 与 omp_* 分开;不把 Codex 默认 Agent 限定为新闻采集,不恢复 legacy task 别名。计划任务仅沿用 manager 方向,任务规划尚未设计。
 - 测试只用已定服务范围;不拉起旧 AstraBot,不自行改变既有远端部署。所有真实测试待授权,本轮不执行。
