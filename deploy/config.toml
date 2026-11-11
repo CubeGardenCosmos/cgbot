@@ -1,19 +1,19 @@
-# cgbot 部署配置模板(M5)。复制为宿主机 /home/klp/cgbot-run/config.toml 后,补全带"占位"标注的项,
+# cgbot 部署配置模板(M5)。复制为宿主机运行目录的 config.toml 后,补全带"【占位】"标注的项,
 # 并删除这些标注(deploy/deploy.sh 发现残留标注会拒绝启动)。
 # 容器内路径:本文件挂载为 /app/config/config.toml;数据目录 /app/data。
 # 密钥只写引用名;值在 secrets.toml(0600),挂载为 /run/secrets/cgbot.toml。
 
 [napcat]
-host = "0.0.0.0"     # 容器内监听;不向宿主机发布端口,仅 qqbot_astrbot_network 内的 NapCat 可连入
+host = "0.0.0.0"     # 容器内监听;不向宿主机发布端口,仅通过外部网络的 NapCat 可连入
 port = 6200
 path = "/ws"
 
 [scope]
 # 省略整节或留空 = 全部拒绝。这是安全的默认值:未补全时机器人不会响应任何人。
-friends = [2749478757]   # 首次上线仅服务主人;追加好友在此扩充
-groups = []          # 群聊暂不开放
-all_friends = true     # 2026-10-31:对所有真实 QQ 好友开放私聊
-owner = 2749478757
+friends = []   # 【占位】补全好友 QQ 号列表;留空 = 全部拒绝(安全的默认值)
+groups = []    # 【占位】补全群号列表;留空 = 全部拒绝
+all_friends = false  # 是否对所有真实好友开放私聊;默认 false
+# owner = 123456789   # 【占位】主人 QQ 号(可选);取消注释并填入真实值后删除本标注
 
 [provider]
 base_url = "https://api.cicori.com/v1"      # 兼容 Responses 与 Chat Completions
@@ -47,10 +47,10 @@ wire_api = "gemini"                            # Gemini 原生 generateContent,�
 base_url = "https://api.cicori.com/v1beta"     # Gemini 原生接口根地址(注意不是 /v1)
 
 [storage]
-data_dir = "/app/data"   # 绝对路径,对应宿主机 /home/klp/cgbot-run/state
+data_dir = "/app/data"   # 绝对路径,对应宿主机运行目录下的 state/
 
 [group]
-wake_keywords = ["大肥鱼"]
+wake_keywords = ["【占位】"]  # 【占位】补全群唤醒关键词
 mute_keywords = []
 idle_timeout_seconds = 600
 max_turns = 30
@@ -59,7 +59,7 @@ skill_memes = 10
 skill_rules = 10
 skill_members = 20
 skill_habits_per_member = 5
-timezone = "Asia/Kuala_Lumpur"   # IANA 时区:群门控睡眠/主动时段、日志时间戳与模型所见消息时间戳均按此计,不依赖进程 TZ
+timezone = "Asia/Shanghai"   # IANA 时区:群门控睡眠/主动时段、日志时间戳与模型所见消息时间戳均按此计,不依赖进程 TZ
 
 # 语音未启用:省略 [voice]。启用前须确认 ASR/TTS 守护进程地址在容器内可达。
 
@@ -92,11 +92,11 @@ port = 8000
 public_base_url = "http://cgbot:8000"     # 沙盒与 NapCat 访问本服务的地址
 
 [coding.docker]
-host = "http://dsh-docker-proxy:2375"     # 旧 dsh-docker-caged 的 Docker API 白名单代理(只读引用)
+host = "http://caged-docker-proxy:2375"     # caged/ 的 Docker API 白名单代理
 sandbox_image = "cgbot-sandbox:latest"
-network = "dsh_caged_internal"
-host_data_dir = "/home/klp/cgbot-data"    # 宿主机绝对路径,容器内同路径挂载
-egress_proxy = "http://dsh-egress:7890"
+network = "caged_internal"
+host_data_dir = "/data/cgbot-data"    # 【占位】宿主机绝对路径,容器内同路径挂载
+egress_proxy = "http://caged-egress:7890"
 idle_seconds = 3600
 container_prefix = "cgbot-sbx-"
 

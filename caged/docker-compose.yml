@@ -1,0 +1,57 @@
+name: caged
+
+x-common: &common
+  restart: unless-stopped
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+
+services:
+  caged-docker-proxy:
+    <<: *common
+    image: tecnativa/docker-socket-proxy:latest
+    # Replace the stock template with the exact allowlist (also disables exec-stream timeouts).
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./docker-proxy/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg.template:ro
+    security_opt: ["no-new-privileges:true", "label:disable"]   # SELinux host
+    networks: [caged_ctl]
+
+  caged-egress:
+    <<: *common
+    build: ./egress
+    environment:
+      HOST_PROXY_PORT: ${HOST_PROXY_PORT:-7895}
+      HOST_PROXY_USER: ${HOST_PROXY_USER:?required}
+      HOST_PROXY_PASS: ${HOST_PROXY_PASS:?required}
+      PRIVILEGED_CIDR: ${PRIVILEGED_CIDR:-172.30.1.128/25}
+      LAN_CIDR: ${LAN_CIDR:-}
+      PROTECTED_HOSTS: ${PROTECTED_HOSTS:-}
+      HOST_PROXY_GROUP: ${HOST_PROXY_GROUP:?required}
+    security_opt: ["no-new-privileges:true", "label:disable"]   # SELinux: read host geosite.dat without relabeling it
+    extra_hosts: ["host.docker.internal:host-gateway"]
+    volumes:
+      # geosite database for the mainland-China domain rule (host's mihomo copy)
+      - ${GEOSITE_FILE:-/etc/mihomo/geosite.dat}:/run/mihomo/geosite.dat:ro
+    tmpfs: [/run/mihomo]
+    networks:
+      caged_internal: {}
+      caged_egress:
+        ipv4_address: ${EGRESS_IP:-172.30.2.2}
+
+networks:
+  caged_internal:
+    name: caged_internal
+    internal: true
+    ipam:
+      config:
+        - subnet: 172.30.1.0/24
+          ip_range: 172.30.1.0/25
+  caged_egress:
+    name: caged_egress
+    ipam:
+      config:
+        - subnet: ${EGRESS_SUBNET:-172.30.2.0/24}
+          ip_range: 172.30.2.128/25   # keep dynamic IPs off the static egress IP
+  caged_ctl:
+    name: caged_ctl
+    internal: true

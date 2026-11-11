@@ -17,7 +17,8 @@ from cgbot.coding.docker import (
     NotFound,
 )
 
-# Transcribed from the DSH docker-socket-proxy allowlist (docker-proxy/haproxy.cfg). The client
+# Transcribed from the caged docker-socket-proxy allowlist
+# (caged/docker-proxy/haproxy.cfg). The client
 # must only ever send requests that this list permits.
 PROXY_ALLOWLIST: tuple[tuple[str, str], ...] = (
     ("GET", r"/(version|_ping|containers/json)"),

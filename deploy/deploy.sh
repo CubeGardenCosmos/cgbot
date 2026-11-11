@@ -5,29 +5,38 @@
 # 用法:
 #   deploy/deploy.sh --check             只读检查本地与远端前置条件,不改动任何东西
 #   deploy/deploy.sh --build             同步源码到远端构建目录并构建镜像(不启动)
+#   deploy/deploy.sh --caged-up          同步 caged/ 到远端并启动 caged compose stack
 #   deploy/deploy.sh --up                检查 + 构建 + 更新 compose 文件 + up -d cgbot + 等待 healthy
 #   deploy/deploy.sh --rollback <tag>    切换到已存在的镜像 tag 并重建 cgbot
 #
+# 必需环境变量:
+#   CGBOT_HOST             SSH 目标(必需,无默认值)
 # 可选环境变量:
-#   CGBOT_HOST             SSH 目标,默认 klp@192.168.1.19
-#   CGBOT_BUILD_DIR        远端构建目录,默认 /home/klp/cgbot-build/bot
-#   CGBOT_RUN_DIR          远端运行目录,默认 /home/klp/cgbot-run
-#   CGBOT_HOST_DATA_DIR    沙盒工作区宿主机目录,默认 /home/klp/cgbot-data
+#   CGBOT_BUILD_DIR        远端构建目录,默认 $HOME/cgbot-build/bot
+#   CGBOT_RUN_DIR          远端运行目录,默认 $HOME/cgbot-run
+#   CGBOT_CAGED_DIR        远端 caged/ 目录,默认 $HOME/caged
+#   CGBOT_HOST_DATA_DIR    沙盒工作区宿主机目录,默认 $HOME/cgbot-data
 #   CGBOT_HEALTH_TIMEOUT   等待 healthy 的秒数,默认 180
-#
-# 本脚本不创建目录、不写 config.toml/secrets.toml、不改 NapCat 与旧 dsh 项目。
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-HOST="${CGBOT_HOST:-klp@192.168.1.19}"
-BUILD_DIR="${CGBOT_BUILD_DIR:-/home/klp/cgbot-build/bot}"
-RUN_DIR="${CGBOT_RUN_DIR:-/home/klp/cgbot-run}"
-DATA_DIR="${CGBOT_HOST_DATA_DIR:-/home/klp/cgbot-data}"
 HEALTH_TIMEOUT="${CGBOT_HEALTH_TIMEOUT:-180}"
+HOST="${CGBOT_HOST:-}"
 
 die() { echo "deploy: $*" >&2; exit 1; }
 log() { echo "deploy: $*"; }
 ssh_run() { ssh -o BatchMode=yes -o ConnectTimeout=10 "$HOST" "$@"; }
+
+# Requires CGBOT_HOST; resolves the remote $HOME so defaults are absolute remote paths.
+init_env() {
+  [[ -n "$HOST" ]] || die "CGBOT_HOST is required (e.g. user@host)"
+  local rhome
+  rhome="$(ssh_run 'printf %s "$HOME"')" || die "cannot ssh to $HOST"
+  BUILD_DIR="${CGBOT_BUILD_DIR:-$rhome/cgbot-build/bot}"
+  RUN_DIR="${CGBOT_RUN_DIR:-$rhome/cgbot-run}"
+  CAGED_DIR="${CGBOT_CAGED_DIR:-$rhome/caged}"
+  DATA_DIR="${CGBOT_HOST_DATA_DIR:-$rhome/cgbot-data}"
+}
 
 check_local() {
   command -v ssh >/dev/null || die "ssh is required"
@@ -36,6 +45,7 @@ check_local() {
   for f in Dockerfile .dockerignore uv.lock pyproject.toml deploy/docker-compose.yml deploy/config.toml; do
     [[ -f "$ROOT/$f" ]] || die "missing $f"
   done
+  init_env
 }
 
 # Read-only remote checks. Never prints secret values.
@@ -47,8 +57,11 @@ ok()  { echo "ok: $*"; }
 bad() { echo "MISSING: $*"; fail=1; }
 docker info >/dev/null 2>&1 && ok "docker daemon reachable" || bad "docker daemon not reachable"
 docker compose version >/dev/null 2>&1 && ok "docker compose available" || bad "docker compose plugin"
-for n in dsh_caged_internal dsh_caged_ctl qqbot_astrbot_network; do
-  docker network inspect "$n" >/dev/null 2>&1 && ok "network $n" || bad "network $n (owned by legacy dsh project)"
+for n in caged_internal caged_ctl cgbot_net; do
+  docker network inspect "$n" >/dev/null 2>&1 && ok "network $n" || bad "network $n (owned by caged/ or create manually)"
+done
+for svc in caged-docker-proxy caged-egress; do
+  docker inspect --type container "$svc" >/dev/null 2>&1 && ok "service $svc running" || bad "service $svc not running (start caged/ stack)"
 done
 if proj=$(docker inspect --type container -f '{{index .Config.Labels "com.docker.compose.project"}}' cgbot 2>/dev/null); then
   [ "$proj" = cgbot ] && ok "container cgbot belongs to compose project cgbot" \
@@ -95,7 +108,7 @@ build() {
 up_tag() {
   local tag="$1"
   rsync -a "$ROOT/deploy/docker-compose.yml" "$HOST:$RUN_DIR/docker-compose.yml"
-  ssh_run "printf 'CGBOT_TAG=%s\nHOST_DATA_DIR=%s\n' '$tag' '$DATA_DIR' > '$RUN_DIR/.env' && cd '$RUN_DIR' && docker compose -p cgbot -f docker-compose.yml up -d --no-deps cgbot"
+  ssh_run "printf 'CGBOT_TAG=%s\nCGBOT_HOST_DATA_DIR=%s\n' '$tag' '$DATA_DIR' > '$RUN_DIR/.env' && cd '$RUN_DIR' && docker compose -p cgbot -f docker-compose.yml up -d --no-deps cgbot"
   wait_healthy
 }
 
@@ -113,6 +126,17 @@ wait_healthy() {
   done
 }
 
+caged_up() {
+  [[ -d "$ROOT/caged" ]] || die "caged/ directory not found in repo"
+  log "syncing caged/ to $HOST:$CAGED_DIR"
+  ssh_run "mkdir -p '$CAGED_DIR'"
+  rsync -a --delete --exclude='/.env' "$ROOT/caged/" "$HOST:$CAGED_DIR/"
+  ssh_run "test -f '$CAGED_DIR/.env'" || die "$CAGED_DIR/.env missing on $HOST: create it from caged/.env.example (never synced) and rerun"
+  log "starting caged stack"
+  ssh_run "cd '$CAGED_DIR' && docker compose -p caged up -d"
+  log "caged stack started"
+}
+
 case "${1:-}" in
   --check)
     check_local
@@ -122,6 +146,10 @@ case "${1:-}" in
   --build)
     check_local
     build >/dev/null
+    ;;
+  --caged-up)
+    check_local
+    caged_up
     ;;
   --up)
     check_local
@@ -136,7 +164,7 @@ case "${1:-}" in
     up_tag "$2"
     ;;
   *)
-    sed -n '2,12p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+    sed -n '2,19p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
     exit 2
     ;;
 esac

@@ -39,11 +39,11 @@ port = 8000
 public_base_url = "http://cgbot:8000/"
 
 [coding.docker]
-host = "http://dsh-docker-proxy:2375"
+host = "http://caged-docker-proxy:2375"
 sandbox_image = "cgbot-sandbox:latest"
-network = "dsh_caged_internal"
-host_data_dir = "/home/klp/cgbot-data"
-egress_proxy = "http://dsh-egress:7890"
+network = "caged_internal"
+host_data_dir = "/data/cgbot-data"
+egress_proxy = "http://caged-egress:7890"
 idle_seconds = 3600
 container_prefix = "cgbot-sbx-"
 
@@ -111,9 +111,9 @@ def test_full_coding_section_loads_with_secrets_resolved(tmp_path: Path) -> None
     assert coding.http.host == "0.0.0.0"
     assert coding.http.port == 8000
     assert coding.http.public_base_url == "http://cgbot:8000"
-    assert coding.docker.host == "http://dsh-docker-proxy:2375"
-    assert coding.docker.host_data_dir == Path("/home/klp/cgbot-data")
-    assert coding.docker.egress_proxy == "http://dsh-egress:7890"
+    assert coding.docker.host == "http://caged-docker-proxy:2375"
+    assert coding.docker.host_data_dir == Path("/data/cgbot-data")
+    assert coding.docker.egress_proxy == "http://caged-egress:7890"
     assert coding.docker.container_prefix == "cgbot-sbx-"
     assert coding.codex.appserver_port == 8765
     assert coding.concurrency.per_user == 4
@@ -187,15 +187,15 @@ def test_missing_secret_is_rejected(tmp_path: Path) -> None:
             "coding.http.public_base_url",
         ),
         (
-            mutate('host = "http://dsh-docker-proxy:2375"', 'host = "dsh:2375"'),
+            mutate('host = "http://caged-docker-proxy:2375"', 'host = "caged:2375"'),
             "coding.docker.host",
         ),
         (
-            mutate('host_data_dir = "/home/klp/cgbot-data"', 'host_data_dir = "relative/dir"'),
+            mutate('host_data_dir = "/data/cgbot-data"', 'host_data_dir = "relative/dir"'),
             "coding.docker.host_data_dir",
         ),
         (
-            mutate('egress_proxy = "http://dsh-egress:7890"', 'egress_proxy = "socks5://x"'),
+            mutate('egress_proxy = "http://caged-egress:7890"', 'egress_proxy = "socks5://x"'),
             "coding.docker.egress_proxy",
         ),
         (

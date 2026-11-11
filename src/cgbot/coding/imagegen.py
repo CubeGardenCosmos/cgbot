@@ -1,6 +1,7 @@
 """Image generation for coding sandboxes (M5, slice F).
 
-Ported from the DSH manager's ``imagegen.py``: the provider call now runs on ``httpx.AsyncClient``
+Ported from the legacy manager's ``imagegen.py``: the provider call now runs on
+``httpx.AsyncClient``
 inside the bot process. Credentials stay in the bot; the sandbox only ever sends a prompt, a size,
 a name and sandbox-side reference paths. The user identity comes from the bridge bearer token.
 

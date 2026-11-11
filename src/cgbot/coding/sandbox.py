@@ -37,7 +37,7 @@ LABEL_MANAGED = "cgbot.managed"
 LABEL_USER = "cgbot.user"
 LABEL_CONFIG_HASH = "cgbot.config-hash"
 
-# Limits copied from the DSH manager (manager/main.py ensure()).
+# Limits copied from the legacy manager (manager/main.py ensure()).
 PIDS_LIMIT = 512
 MEM_LIMIT_BYTES = 2 * 1024**3
 NANO_CPUS = 2_000_000_000

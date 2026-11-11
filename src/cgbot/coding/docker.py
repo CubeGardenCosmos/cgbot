@@ -1,6 +1,6 @@
 """Minimal Docker Engine API client for sandbox lifecycle (M5, slice B).
 
-Talks only to the docker-socket-proxy allowlist (``docker-proxy/haproxy.cfg`` in the DSH
+Talks only to the docker-socket-proxy allowlist (``caged/docker-proxy/haproxy.cfg`` in the
 deployment). The client additionally refuses to send any request whose (method, path) is not one
 of the routes below, so a future edit cannot silently widen what the bot asks of the daemon.
 """

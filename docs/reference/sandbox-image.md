@@ -10,7 +10,7 @@
 docker build -t cgbot-sandbox:latest sandbox/
 ```
 
-- 基础镜像 `node:22-bookworm-slim`(非 DSH 镜像)。
+- 基础镜像 `node:22-bookworm-slim`。
 - 已实测:镜像大小 6.74GB;`codex --version` 为 `codex-cli 0.166.0`。
 - 构建时使用 npmmirror(npm)与阿里云(pip/uv、apt)镜像;在目标网络不同时需改 `ENV`。
 
@@ -76,7 +76,7 @@ Codex 0.166 中未知 slug 的模型不会在 Responses 请求中直接暴露 MC
 
 ## Smoke 证据
 
-在远端 192.168.1.19 构建后,于一次性网络 `cgbot-smoke-net` 中运行:一个 stdlib 假 Responses 上游(记录工具形状与令牌匹配结果,不记录请求体)与一个沙盒容器(仅启动参数,无真实密钥)。
+在目标宿主机构建后,于一次性网络 `cgbot-smoke-net` 中运行:一个 stdlib 假 Responses 上游(记录工具形状与令牌匹配结果,不记录请求体)与一个沙盒容器(仅启动参数,无真实密钥)。
 
 | 检查 | 结果 |
 | --- | --- |
@@ -98,7 +98,7 @@ Codex 0.166 中未知 slug 的模型不会在 Responses 请求中直接暴露 MC
 - 诊断未验证(见上)。`rename_symbol` 等其他 cclsp 工具未实测。
 - 未接入真实 Responses 上游;模型请求经假上游验证,未验证真实模型质量或真实上下文窗口。
 - 网关令牌对沙盒内 agent 进程可见(`env_key` 必须由 Codex 读取)。这是设计内的已知风险,由 B 切片的 egress 与 gateway 限额约束。
-- `findata` 的 SKILL.md 含旧 DSH 时代的"Contacted hosts and sandbox egress"段落,需 B/J 切片确认或改写。
+- `findata` 的 SKILL.md 含旧 AstrBot 时代的"Contacted hosts and sandbox egress"段落,需 B/J 切片确认或改写。
 - 镜像仍较大(6.74GB),含 tesseract、ImageMagick、ffmpeg、weasyprint、CJK 字体等依赖。
 - Chromium 以 `--no-sandbox` 运行,依赖容器层的能力削减(CapDrop ALL、no-new-privileges)作为外层隔离。
 - 推论:`CGBOT_CONTEXT_WINDOW` 为本切片新增环境变量,未在 `contracts.py` 中登记。
@@ -108,5 +108,5 @@ Codex 0.166 中未知 slug 的模型不会在 Responses 请求中直接暴露 MC
 - LSP 选择 cclsp(MCP 代理,覆盖 pyright 与 typescript-language-server)。拒绝 `mcp-language-server`(Go 二进制,依赖与镜像体积较大)与 `lsp-mcp`(能力较弱)。
 - `tini` 作为 PID 1,以回收 MCP 子进程(偏离简单 `CMD`)。
 - apt 使用阿里云镜像(远端访问 tuna 失败),npm 使用 npmmirror。
-- 不 `FROM dsh-sandbox`;不复制 DSH 的 `.env`、`ssh/99-egress.conf`、`dsh-tools` 或 `index.js`。
+- 不依赖其他项目的镜像或配置。
 - 浏览器配置目录 `/home/agent/.browser-profile` 位于每用户主目录卷中,随容器重建保留。

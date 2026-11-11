@@ -12,11 +12,11 @@ TOML shape (parsed by ``cgbot.config.loader`` into :class:`CodingConfig`)::
     public_base_url = "http://cgbot:8000"     # how sandboxes AND NapCat reach this server
 
     [coding.docker]
-    host = "http://dsh-docker-proxy:2375"
+    host = "http://caged-docker-proxy:2375"
     sandbox_image = "cgbot-sandbox:latest"
-    network = "dsh_caged_internal"
-    host_data_dir = "/home/klp/cgbot-data"    # absolute HOST path, same path inside the bot
-    egress_proxy = "http://dsh-egress:7890"
+    network = "caged_internal"
+    host_data_dir = "/data/cgbot-data"    # absolute HOST path, same path inside the bot
+    egress_proxy = "http://caged-egress:7890"
     idle_seconds = 3600
     container_prefix = "cgbot-sbx-"
 
