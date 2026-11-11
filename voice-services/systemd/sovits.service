@@ -1,0 +1,16 @@
+[Unit]
+Description=cgbot voice service: SoVITS (TTS)
+After=network.target
+
+[Service]
+Type=simple
+User=<service-user>
+# WorkingDirectory 必须是 sovits/:GPT_SoVITS 的 TTS_Config 使用相对路径 GPT_SoVITS/configs/ 并在该处创建目录。
+WorkingDirectory=<install-dir>/voice-services/sovits
+EnvironmentFile=<env-dir>/sovits.env
+ExecStart=<venv-dir>/bin/python server.py
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

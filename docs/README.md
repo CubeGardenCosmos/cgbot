@@ -12,6 +12,7 @@
 | 当前具体任务与实施顺序 | [TODO 索引](todos/README.md) |
 | 仓库规范、硬约束与原子化提交 | [AGENTS.md](../AGENTS.md) |
 | 部署指南 | [部署参考](reference/deploy.md) |
+| 语音服务部署(SoVITS/FunASR) | [语音服务部署参考](reference/voice-services.md) |
 | 角色卡语法与配置 | [角色卡参考](reference/character-card.md) |
 | 容器栈配置 | [caged/README.md](../caged/README.md) |
 | 许可证 | [LICENSE](../LICENSE) |

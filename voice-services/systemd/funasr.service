@@ -1,0 +1,15 @@
+[Unit]
+Description=cgbot voice service: FunASR (ASR)
+After=network.target
+
+[Service]
+Type=simple
+User=<service-user>
+WorkingDirectory=<install-dir>/voice-services/asr
+EnvironmentFile=<env-dir>/funasr.env
+ExecStart=<venv-dir>/bin/python server.py
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

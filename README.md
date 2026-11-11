@@ -129,6 +129,8 @@ For production deployment with Docker:
 
 See [`caged/README.md`](caged/README.md) for details on the container stack (Docker API allowlist proxy, egress proxy, sandbox image).
 
+Voice (optional TTS/ASR daemons): see the [voice services guide](docs/reference/voice-services.md) and [`voice-services/`](voice-services/README.md).
+
 ## Security Model
 
 - **Identity Isolation**: Private chats and memory isolated from group chats

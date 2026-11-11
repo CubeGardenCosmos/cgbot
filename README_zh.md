@@ -130,6 +130,8 @@ uv run pytest -m integration
 
 参见 [`caged/README.md`](caged/README.md) 了解容器栈详情(Docker API 白名单代理、出站代理、沙盒镜像)。
 
+语音(可选的 TTS/ASR 守护进程):见[语音服务部署参考](docs/reference/voice-services.md)与 [`voice-services/`](voice-services/README.md)。
+
 ## 安全模型
 
 - **身份隔离**:私聊与记忆本和群聊完全隔离

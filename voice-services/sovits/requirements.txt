@@ -1,0 +1,6 @@
+# SoVITS 守护进程与 FunASR 共用同一份固定版本清单。
+# 依据:宿主机上只存在 funasr 的 venv;sovits_service 目录下没有自己的 venv(已检查),
+# 而该 venv 已包含 sovits 代码导入的 torch、soundfile、librosa、transformers、jieba、pypinyin、
+# cn2an、g2p_en、split_lang、fast_langdetect、jamo、jaconv 等。[推论] SoVITS 在该环境(或等价环境)中运行,未能直接验证。
+# 未在该 venv 中发现:pyopenjtalk、ffmpeg 可执行文件(日语文本路径可能需要 pyopenjtalk;见 docs/reference/voice-services.md 已知缺口)。
+-r ../asr/requirements.txt

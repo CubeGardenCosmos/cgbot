@@ -1,0 +1,44 @@
+# Model weights and checkpoints
+*.pth
+*.ckpt
+*.safetensors
+*.bin
+*.onnx
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+
+# Runtime data caches
+*.pickle
+*.pkl
+
+# Pretrained models directory
+sovits/core/GPT_SoVITS/pretrained_models/
+sovits/core/pretrained_models/
+
+# User-trained models
+sovits/models/
+
+# Large dictionary files
+sovits/core/text/ja_userdic/
+
+# Test output
+*.wav
+*.mp3
+output_test.*
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
