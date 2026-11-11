@@ -38,7 +38,7 @@ GID = "5001"
 SID = f"group:{GID}"
 T0 = 1_000_000.0
 LIMITS = SkillLimits(topics=5, memes=5, rules=5, members=3, habits_per_member=3)
-TZ = ZoneInfo("Asia/Kuala_Lumpur")
+TZ = ZoneInfo("Asia/Shanghai")
 
 
 class Clock:
@@ -662,7 +662,7 @@ async def test_group_instructions_explain_the_timestamps(
     await mgr.handle(gmsg("m1", "u1", "大肥鱼 hi"), "wake")
 
     assert "方括号时间" in provider.chat_requests[0].instructions
-    assert "Asia/Kuala_Lumpur" in provider.chat_requests[0].instructions
+    assert "Asia/Shanghai" in provider.chat_requests[0].instructions
 
 
 async def test_proactive_buffered_lines_carry_their_own_times(

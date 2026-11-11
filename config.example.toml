@@ -73,8 +73,13 @@ data_dir = "data"    # 相对本配置文件所在目录;运行时数据,不入�
 #   sessions.sqlite   聊天记录(会话日志)
 #   scheduler.sqlite  调度器系统事件(记忆本等后续模块各用 <模块名>.sqlite)
 
+[persona]
+# 角色卡:定义机器人的人格、语气与唤醒词。卡为 Markdown 文件,开头用 --- 包裹的 YAML 格式 frontmatter,
+# 定义 name(必填)与 wake_keywords(可选列表),下方为人格文本。修改卡需要重启进程(提示词缓存稳定性)。
+# card = "characters/custom.md"   # 相对配置文件目录;省略 = 使用内置默认卡(大肥鱼)
+
 [group]
-wake_keywords = ["大肥鱼"]  # 唤醒关键词:@ 机器人且消息含关键词才唤醒
+# wake_keywords = ["大肥鱼"]  # 唤醒关键词:@ 机器人且消息含关键词才唤醒。省略 = 使用角色卡中的 wake_keywords
 mute_keywords = []          # 闭嘴关键词,默认为空(具体规则在群聊里程碑中确定)
 # 群聊会话与技能上限(默认值为推论,待实测调整)
 idle_timeout_seconds = 600  # 群会话空闲多少秒后结束
@@ -84,7 +89,7 @@ skill_memes = 10            # 群技能:梗条数上限
 skill_rules = 10            # 群技能:群规条数上限
 skill_members = 20          # 群技能:成员条数上限
 skill_habits_per_member = 5 # 每位成员的习惯条数上限
-timezone = "Asia/Kuala_Lumpur"  # IANA 时区名;群门控的本地小时(睡眠 00–08、主动 08–24)、日志时间戳与模型所见消息时间戳均按此计,不依赖进程 TZ;非法名称启动失败
+timezone = "UTC"  # IANA 时区名;群门控的本地小时(睡眠 00–08、主动 08–24)、日志时间戳与模型所见消息时间戳均按此计,不依赖进程 TZ;非法名称启动失败
 
 # 语音(可选)。省略整节 = 语音关闭:私聊语音只记为 [语音],不注册 send_voice 工具。
 # 语音转写失败时私聊内容为 [语音识别失败]。
@@ -112,10 +117,10 @@ timezone = "Asia/Kuala_Lumpur"  # IANA 时区名;群门控的本地小时(睡眠
 # port = 8000
 # public_base_url = "http://cgbot:8000"   # 沙箱与 NapCat 访问本服务的地址
 # [coding.docker]
-# host = "http://dsh-docker-proxy:2375"
+# host = "http://caged-docker-proxy:2375"
 # sandbox_image = "cgbot-sandbox:latest"
-# network = "dsh_caged_internal"
-# host_data_dir = "/home/klp/cgbot-data"  # 宿主机绝对路径(容器内外须同一路径)
+# network = "caged_internal"
+# host_data_dir = "/data/cgbot-data"  # 宿主机绝对路径(容器内外须同一路径)
 # egress_proxy = ""                       # 可选;空 = 无代理
 # idle_seconds = 3600
 # container_prefix = "cgbot-sbx-"

@@ -8,13 +8,14 @@ from typing import TYPE_CHECKING, Final, Literal
 
 if TYPE_CHECKING:
     # voice/config.py imports ConfigError from this module; a runtime import would be a cycle.
+    from cgbot.character import CharacterCard
     from cgbot.coding.config import CodingConfig
     from cgbot.voice.config import VoiceConfig
 
 Scope = Literal["private", "group"]
 WireApi = Literal["responses", "chat", "gemini"]
 WIRE_APIS: Final = ("responses", "chat", "gemini")
-DEFAULT_TIMEZONE: Final = "Asia/Kuala_Lumpur"
+DEFAULT_TIMEZONE: Final = "UTC"
 
 
 class ConfigError(Exception):
@@ -251,6 +252,7 @@ class Config:
     scope: ScopeConfig
     provider: ProviderConfig
     group: GroupConfig
+    persona: CharacterCard
     storage: StoragePaths
     logging: LoggingConfig
     voice: VoiceConfig | None = None  # None: [voice] table absent, voice disabled

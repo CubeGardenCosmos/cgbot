@@ -2,14 +2,14 @@
 
 > 状态:**探讨模式**,本文档随对话持续更新。
 > 约定:`[已定]` = 用户明确表态;`[待定]` = 尚在讨论;`[推论]` = 我基于已定内容或调研的推断,需用户确认;`[调研]` = 来自对现有环境的只读观察。
-> 当前阶段只写文档,不写代码,不改动任何现有系统(含 192.168.1.19 上的 AstraBot/NapCat/SoVITS/ASR)。AGENTS.md 待用户指令后再创建。
+> 当前阶段只写文档,不写代码,不改动任何现有系统(含 legacy 主机上的 AstraBot/NapCat/SoVITS/ASR)。AGENTS.md 待用户指令后再创建。
 
 ## 1. 背景
 
-- 现状:192.168.1.19 上运行 AstraBot 实例承载 QQ 机器人。`[已定]` 它已无法满足需求。
+- 现状:legacy 主机上运行 AstraBot 实例承载 QQ 机器人。`[已定]` 它已无法满足需求。
 - 决策:`[已定]` 新建一个机器人框架,替换 AstraBot。
-- `[调研]` 现有部署(据 `~/dsh-docker-caged/HANDOFF.md`):`/home/klp/qqbot` 内为 NapCat + AstraBot(`soulter/astrbot`)的 docker-compose;调度中枢是自写插件 `astrbot_plugin_identity_helper`;另有 `agent_irc` 等插件。
-- `[调研]` 本机(`/home/klp/cgbot` 所在机器,192.168.1.11)上有两个相关插件工程:`~/dsh-docker-caged/astrbot_plugin`(沙盒任务/计划/发图发文件)、`~/qqbot-to-omp-web/astrbot_plugin_omp_control`(OMP 任务控制)。`/home/klp/cgbot` 为空。
+- `[调研]` 现有部署(据 legacy 容器工程文档):legacy 部署目录内为 NapCat + AstraBot(`soulter/astrbot`)的 docker-compose;调度中枢是自写插件 `astrbot_plugin_identity_helper`;另有 `agent_irc` 等插件。
+- `[调研]` 本机上有两个相关插件工程:legacy 容器工程的插件目录(沙盒任务/计划/发图发文件)、`astrbot_plugin_omp_control`(OMP 任务控制)。
 - `[已定]` 已有资产主要以 **AstraBot 插件**(Python)形式存在。**特别关注:SoVITS(TTS)与 ASR 推理服务器。**
 
 ## 2. 目标
@@ -90,7 +90,7 @@
   - 一轮内可多次调用回复工具(分段、多渠道)。
   - 需要把"沉默"与"出错"区分清楚。
   - `[已定]`(用户 2026-11-05)**模型失败的可观察结果**:供应商层对连接失败/连接超时/5xx/429 在收到任何响应字节之前有界重试(`[provider] retry_attempts` 默认 2,退避默认 2s、5s,429 遵守 `Retry-After` 且设上限 30s;已产生流式输出后不重试);仍失败时,**私聊**轮次若尚未发出任何回复,由程序以固定短文本经出站发送器通知用户(不经模型),并以无 `item` 的 `system_event`(`model_failure_notice`)记入历史,不当作助手发言重放;**群聊**不向群内发任何内容,仅记日志。
-- `[调研]` 现有 `astrbot_plugin_dsh_caged` 已有 `send_image` / `send_file`(按事件发送者身份发送,不接受用户 ID 参数);新框架应沿用"身份取自事件,模型不能指定其他用户"的约束。
+- `[调研]` 现有 legacy 沙盒插件已有 `send_image` / `send_file`(按事件发送者身份发送,不接受用户 ID 参数);新框架应沿用"身份取自事件,模型不能指定其他用户"的约束。
 - `[待定]` 通知链路:后台事件(任务完成、定时)如何触发模型一轮(现有做法是 AstraBot 的 `CronMessageEvent` 合成事件;新框架需要原生的"系统事件入队"机制)。每日统计的数据来源与口径(见 §7、§12)。
 
 ## 7. 记忆本与群聊
@@ -157,13 +157,13 @@ stateDiagram-v2
 
 | 资产 | 位置 | 复用方式 | 约束 |
 |---|---|---|---|
-| SoVITS 推理服务 | 192.168.1.19 `/home/klp/sovits_service`,TCP 10096 + UDS | 复制现有插件 `socket_client.py` 的线协议为新框架 `SoVITSClient` | `[已定]` **严禁修改**服务端;不重启、不改配置、不改 venv |
-| ASR 推理服务(SenseVoice) | 192.168.1.19 `/home/klp/funasr_service`,TCP 10095 + UDS | 同上,`FunASRClient` | 同上 |
+| SoVITS 推理服务 | legacy 主机,TCP 10096 + UDS | 复制现有插件 `socket_client.py` 的线协议为新框架 `SoVITSClient` | `[已定]` **严禁修改**服务端;不重启、不改配置、不改 venv |
+| ASR 推理服务(SenseVoice) | legacy 主机,TCP 10095 + UDS | 同上,`FunASRClient` | 同上 |
 | 人设/群聊/私聊提示词 | identity_helper 的 Python 常量 | 移植文本;触发/路由逻辑按新架构重写 | 取舍待定 |
 | 群技能卡(群聊画像雏形) | group_history_summarizer | 移植 merge/format/parse 逻辑与提示词,作为画像 v0 | 已知缺陷见 §11.7 |
 | 消息防抖 | identity_helper | 移植"缓冲 + 延长 + 上限"模式 | — |
 | 群消息历史库 `group_messages` 及查询 | group_history_summarizer | 可移植 SQL 与表结构;数据是否导入新库 `[待定]` | — |
-| dsh_caged | 本机 `~/dsh-docker-caged`,manager REST/WS | 对接 manager API;AstraBot 侧工具层重写为新框架工具 | manager/沙盒本体不动 |
+| legacy 沙盒系统 | 本机 legacy 容器工程,manager REST/WS | 对接 manager API;AstraBot 侧工具层重写为新框架工具 | manager/沙盒本体不动 |
 | omp_control | 本机 `~/qqbot-to-omp-web` | 按工具移植,对接 ompweb | 同上 |
 | 表情包 / 梗百科 / 搜索 / 视频抽帧 / 群日报 / 新闻订阅 | 上游或自写插件 | 是否保留、如何保留 `[待定]` | — |
 
@@ -209,8 +209,8 @@ flowchart LR
 
 ### 11.1 部署与规模
 
-- `/home/klp/qqbot`:NapCat(`mlikiowa/napcat-docker`)+ AstrBot(`soulter/astrbot`,版本 `[推论]` 约 4.28–4.29)。
-- **所有容器(napcat、astrbot、news-rsshub、dsh-*)当前为 Paused**,astrbot 自 2026-10-28T17:10Z,原因未知;调研未做任何恢复。
+- `legacy 部署目录`:NapCat(`mlikiowa/napcat-docker`)+ AstrBot(`soulter/astrbot`,版本 `[推论]` 约 4.28–4.29)。
+- **所有容器(napcat、astrbot、news-rsshub、legacy-*)当前为 Paused**,astrbot 自 2026-10-28T17:10Z,原因未知;调研未做任何恢复。
 - 规模(下限,WAL 未计入):4 个群;群消息 14 天表 2723 条/60 个发言人;私聊用户约 5 个;LLM 调用累计 960 次,唯一 provider 为 `deepseek-v4.1-flash`(内部 OpenAI 兼容网关);平台事件 aiocqhttp 2907、cron 271、`weixin_oc` 18、webchat 9。`[推论]` 规模很小,单进程 asyncio 足够。
 - 数据:`data_v4.db`(conversations 11、platform_message_history 3001…)、`group_history_14d.db`(`group_messages`)、`group_skills/<gid>.json`、`group_reports/`、`plugin_data/`。
 
@@ -231,20 +231,20 @@ flowchart LR
 - **GPU**:GeForce 830M 约 2GB,两服务合计占约 1.5GB,余约 535MB,无跨进程协调;SoVITS 与 ASR 共用同一 venv。
 - 现有插件的 `socket_client.py`(约 100–115 行,仅 asyncio/json/base64)是纯线协议客户端,可复制。
 - **对新框架的约束 `[推论]`**:
-  - TTS 只给主机文件路径 → 新框架必须能读到该路径,即**与 SoVITS 同机部署**(192.168.1.19)或共享挂载。
+  - TTS 只给主机文件路径 → 新框架必须能读到该路径,即**与 SoVITS 同机部署**(legacy 主机)或共享挂载。
   - 现有"WAV→silk"依赖 AstrBot 内部函数,"QQ 语音→WAV"同理;新框架需自备转换(ffmpeg / silk 编码),或验证 NapCat 可直接收 WAV。
   - 现有语音触发逻辑(`smart`:私聊语音进→语音出、关键词抑制、会话级开关)在新框架中应改为"回复工具的发送形式"由模型决定。
 
 ### 11.4 现有插件(13 个)
 
-- 自写:`agent_irc`、`dsh_caged`、`funasr`、`group_history_summarizer`、`identity_helper`、`news_collector`、`omp_control`、`sovits`、`video_inspector`。
+- 自写:`agent_irc`、`legacy_sandbox`、`funasr`、`group_history_summarizer`、`identity_helper`、`news_collector`、`omp_control`、`sovits`、`video_inspector`。
 - 上游:`astrbot_all_search`、`memewiki`、`qq_group_daily_analysis`(含本地补丁)、`meme_manager`。
 
 ### 11.5 identity_helper:现有身份与路由
 
 - 三个 agent 经内存 IRC 总线通信:main_agent / group_subagent / private_subagent;群聊要引用私聊内容时走 `REQUEST_PRIVATE_SUMMARY`。
 - 身份:`MASTER_QQ` 硬编码;角色 `group_at`、`group_chime_in`、`private`;人设为"深海鲸鱼娘",提示词是 `main.py` 中的字符串常量。
-- 工具白名单按子串匹配;OMP/DSH 的私有工具仅给私聊 agent。
+- 工具白名单按子串匹配;OMP/legacy 的私有工具仅给私聊 agent。
 
 ### 11.6 现有群聊设定(旧行为;其中触发规则已被 §7.2 取代)
 
@@ -289,7 +289,7 @@ flowchart LR
 - `[已定]` 部署位置:**暂不讨论**。
 - `[已定]` 群聊轮次推理档位:**low**(群会话总结同按 low `[推论]`)。
 - `[已定]` 记忆本采用"**可见域标签 + 注入时过滤**"作为硬约束;允许只读查看 `weixin_oc` 适配源码与 4 份记忆设计文档(调研进行中,结果补入 §11)。
-- `[已定]` "任务规划"(DSH `task` 首次调用时的规划)**将重做**,单独讨论,暂不设计。
+- `[已定]` "任务规划"(legacy `task` 首次调用时的规划)**将重做**,单独讨论,暂不设计。
 - `[已定]` 微信(OpenClaw)入口**只做私聊**,不支持也不需要支持群聊。因此群聊子系统(§7.2)只对接 NapCat/QQ;微信适配器无需群相关事件与门控。
 - `[已定]` 微信(OpenClaw)**先不支持**。首期只有 QQ 入口;关联微信、微信通知回退等一并后置。
 
@@ -327,7 +327,7 @@ flowchart LR
 1. **每日统计与"最常用入口"**:口径按近 N 天消息数?统计存哪、谁来写?(现有没有这个功能。)
 2. **记忆本**:是否让我读取那 4 份记忆设计文档作为输入?"可见域标签 + 注入时过滤"作为硬约束可以吗?
 3. **OpenClaw 文档**:微信后置,暂不需要。
-4. **现有功能取舍**:表情包、梗百科、搜索、视频抽帧、DSH 任务、OMP 控制——哪些要在新框架保留?
+4. **现有功能取舍**:表情包、梗百科、搜索、视频抽帧、legacy 任务、OMP 控制——哪些要在新框架保留?
 5. **任务规划**:将重做,另行讨论(§13.3)。
 6. **群聊推理档位**:已定 low。
 7. **"其他参与者回复了"的判定**:引用机器人那条、@机器人,还是任意后续发言?多久无人回复算结束?续聊期间是否不再要求 @+关键词?(我理解不再要求。)
@@ -373,23 +373,23 @@ flowchart LR
 - 群聊:同一渲染路径,群成员消息与机器人 `reply` 同样带时间戳。主动回话的缓冲消息各带自己的消息时间(`[时间] [成员 id] 文字`);这些时间在入轮时已写进该条文字,是缓冲消息唯一的时间来源,不随格式变化追溯。
 - 私聊与群聊的系统提示各加一句说明:消息前的方括号时间为该消息的当地时间(时区名),最新一条即当前时间附近。压缩摘要请求与群会话总结输入仍用原文字,不含时间戳。
 
-### 13.3 Codex 任务子代理(替代 DSH)
+### 13.3 Codex 任务子代理(替代 legacy)
 
 `[已定]`:
 
-- 任务由 **Codex** 执行。设计与现有 DSH-caged 类似,**只是把 DSH 的位置换成 Codex**。
+- 任务由 **Codex** 执行。设计与现有 legacy 沙盒系统 类似,**只是把 legacy 的位置换成 Codex**。
 - 自带**插件、SKILLS 和内置的一整套软件包**(预装进镜像)。
 - **默认 YOLO 模式**启动,并**作为服务器工作**(常驻,而非一次性命令)。
 - **用户的 agent 可以管理会话**。
 - 任务子代理可以**创建 Codex 的子代理**,并可使用 **Playwright**。
-- "任务规划"(原 DSH 首次调用时的规划)将**重做**,后续单独讨论。
+- "任务规划"(原 legacy 首次调用时的规划)将**重做**,后续单独讨论。
 
 `[推论]` 含义与风险,待确认:
 
 - `[已查证]` "作为服务器"即 Codex **app-server**(JSON-RPC 2.0,支持 stdio / WebSocket / unix socket),详见 §13.6。
-- **YOLO 的安全边界必须由外层容器给**:沿用 DSH-caged 的零信任铁律——沙盒不挂 docker.sock、不可见真实密钥、模型请求经 gateway 注入密钥、egress 受控、每用户独立卷与主目录。
-- `[已定]` **Codex 的模型请求走沙盒的 gateway**(沿用 DSH-caged 的密钥隔离)。**上游服务器必须原生支持 Responses API;gateway 不做协议翻译**,只做令牌校验、真实密钥注入、流式透传(必要时调整路径/头部)。需要翻译的话由上游自己处理。单一供应商决议不变。
-- **可复用**:dsh-docker-caged 的 manager(任务注册表、计划任务、提问/回答、文件与图片回传)、gateway、egress、镜像分层与用户卷布局。**需替换**:镜像里的 DSH、`dsh-plugin-bot-bridge`(→ Codex 侧的桥接,形态如 MCP server 或 skill)。
+- **YOLO 的安全边界必须由外层容器给**:沿用 legacy 沙盒系统 的零信任铁律——沙盒不挂 docker.sock、不可见真实密钥、模型请求经 gateway 注入密钥、egress 受控、每用户独立卷与主目录。
+- `[已定]` **Codex 的模型请求走沙盒的 gateway**(沿用 legacy 沙盒系统 的密钥隔离)。**上游服务器必须原生支持 Responses API;gateway 不做协议翻译**,只做令牌校验、真实密钥注入、流式透传(必要时调整路径/头部)。需要翻译的话由上游自己处理。单一供应商决议不变。
+- **可复用**:legacy 容器工程 的 manager(任务注册表、计划任务、提问/回答、文件与图片回传)、gateway、egress、镜像分层与用户卷布局。**需替换**:镜像里的 legacy、`legacy-plugin-bot-bridge`(→ Codex 侧的桥接,形态如 MCP server 或 skill)。
 - **会话管理工具**可参照 `omp_control` 的集合(列表、创建、续接、peek、steer、stop、compact、answer),`[待定]` 取舍。
 
 ### 13.4 默认 Coding Agent 与用户关联的 Coding Agent
@@ -481,7 +481,7 @@ flowchart LR
 | 报告/通知 | `omp_task_report` + 后台唤醒 | 通知流(`turn/completed` 等) | |
 | 续接 | 隐式(POST 会懒恢复) | `thread/resume` | |
 | 分叉/归档/删除/改名 | 无 | `thread/fork`、`archive`、`delete`、`name/set` | Codex 多出的能力 |
-| 计划任务 | 无(DSH-caged manager 有 `schedule_*`) | 无 | 由 manager 统一调度 |
+| 计划任务 | 无(legacy 沙盒系统 manager 有 `schedule_*`) | 无 | 由 manager 统一调度 |
 
 `[推论]` 设计倾向,待讨论:
 
@@ -495,8 +495,8 @@ flowchart LR
 **决议(第十一轮 `[已定]`)**:
 
 - **工具分开,不统一**:`codex_*` 一套(新),`omp_*` 一套(沿用 omp_control 的形态),不做后端无关的抽象层。理由:以后加其他渠道/后端更方便。
-- **`codex_*` 工具集的定位:替代 DSH 的 `task` 工具族**(`task`/`task_list`/`task_progress`/`answer_task` 等)。
-- **彻底放弃 DSH 支持**:新框架不再对接 DSH,不保留兼容层。DSH-caged 里可复用的只是与 DSH 无关的部分(manager 的容器生命周期、计划任务、gateway、egress、用户卷布局;§13.3),凡是依赖 DSH 的(镜像里的 DSH、`dsh-plugin-bot-bridge`、DSH NDJSON 事件解析)一律替换。
+- **`codex_*` 工具集的定位:替代 legacy 的 `task` 工具族**(`task`/`task_list`/`task_progress`/`answer_task` 等)。
+- **彻底放弃 legacy 支持**:新框架不再对接 legacy,不保留兼容层。legacy 沙盒系统里可复用的只是与 legacy 无关的部分(manager 的容器生命周期、计划任务、gateway、egress、用户卷布局;§13.3),凡是依赖 legacy 的(镜像里的 legacy、`legacy-plugin-bot-bridge`、legacy NDJSON 事件解析)一律替换。
 - **忙时发送 = 排队**:Codex app-server 本身没有队列,所以由 manager/框架自己维护每个 thread 的指令队列:turn 进行中收到新指令则入队,`turn/completed` 后依次 `turn/start`;`stop` 可选清空队列;`turn/steer` 作为独立的"转向"工具保留。`omp_*` 沿用其自带队列。
 - **保留** `omp_task_usage` 的账户额度视图与 `omp_task_listdir` 的模糊目录解析(仅 `omp_*` 侧)。
 - `[待定]` `codex_*` 的具体工具清单与参数,待设计细化时逐个定;是否也要 `codex` 侧的额度/用量视图(Codex 有 `thread/tokenUsage/updated`)。
@@ -504,33 +504,34 @@ flowchart LR
 ## 14. 变更记录
 
 - 2026-10-30:创建初稿。
-- 2026-10-30:纳入用户第二轮回答(复用重点 SoVITS/ASR 且不得修改;群聊;记忆本与隐私;回复即工具;空闲 8h 主动压缩;反向 WS);加入对本机相关插件的初步调研;发起 192.168.1.19 只读调研。
+- 2026-10-30:纳入用户第二轮回答(复用重点 SoVITS/ASR 且不得修改;群聊;记忆本与隐私;回复即工具;空闲 8h 主动压缩;反向 WS);加入对本机相关插件的初步调研;发起 legacy 主机 只读调研。
 - 2026-10-30:纳入三路只读调研结果(NapCat/部署、语音服务、插件与记忆本),新增 §11 全部内容,重写 §8、§9 相关条目,更新 §12 待答问题。
 - 2026-10-30:纳入用户第三轮(群聊规则:@+关键词唤醒、睡眠时段与 12h 配额的随机主动回话、续聊条件、72h 静音、结束会话工具、会话总结与群 SKILL)和强调"私聊与群聊逻辑完全不同";新增 §7.1–7.3,更新 §4、§10、§11.6、§12。
 - 2026-10-30:纳入第四轮决议(群画像进记忆本、p=1/12 + 12h 冷却、睡眠时段 @ 也静默、静音不记录、并行切换、旧框架保留群分析与新闻订阅、部署位置暂缓);重写 §12。
 - 2026-10-30:纳入第五轮决议(旧 AstraBot 不拉起、只跑新框架;测试范围好友 + 配置固定群;微信即官方 OpenClaw;50% 窗口压缩;单供应商但抽象;推理档位 摘要 low/私聊 high/任务规划 Max);重写 §5.4、§12.1–12.3。
 - 2026-10-30:纳入第六轮(群聊 low 档、记忆本可见域硬约束、任务规划将重做、微信仅私聊)与 4 份记忆设计文档调研(§12.1b)。
 - 2026-10-30:纳入 OpenClaw 协议调研(§12.1c)。
-- 2026-10-30:微信后置(首期不支持);新增 §13 Agent 行为(私聊输入状态与 5 秒规则、运行中新消息作为工具结果、Codex 任务子代理替代 DSH、YOLO 服务器模式、默认/关联 Coding Agent)。
+- 2026-10-30:微信后置(首期不支持);新增 §13 Agent 行为(私聊输入状态与 5 秒规则、运行中新消息作为工具结果、Codex 任务子代理替代 legacy、YOLO 服务器模式、默认/关联 Coding Agent)。
 - 2026-10-30:纳入第八轮(NapCat 输入状态查证、无工具调用时直接打断、Codex 走沙盒 gateway 并需升级、ompweb 可关联);新增 §13.6 NapCat/Codex 只读调研结论。
 - 2026-10-30:纳入第九轮(输入停止按 5 秒、默认 Coding Agent 不限用途、gateway 不翻译而要求上游原生支持 Responses)。
 - 2026-10-30:纳入第十轮(输入无等待上限、ompweb 沿用现有录入流程);新增 §13.7 会话管理工具对照,待讨论。
-- 2026-10-30:纳入第十一轮(codex_*/omp_* 分开、codex 工具替代 DSH task、彻底放弃 DSH、忙时排队、保留额度视图与目录模糊解析)。
+- 2026-10-30:纳入第十一轮(codex_*/omp_* 分开、codex 工具替代 legacy task、彻底放弃 legacy、忙时排队、保留额度视图与目录模糊解析)。
 - 2026-10-30:纳入第十二轮(回报桥接支持 512MB 二进制、Codex 子代理不限但按用户并发限制 4→1、Playwright 登录态持久化)。
 - 2026-10-30:纳入第十三轮(512MB 文件按 2MB 切块、QQ 侧限制暂不处理、429 降级后 1 小时无 429 直接恢复)。
 - 2026-10-30:纳入第十四轮(1 分钟内 3 次 429/故障降级、降级全局)。
 - 2026-10-30:纳入第十五轮(用户决定:群续聊=其他人回复即续、免 @、3 分钟无人接话结束;静音词任何 @ 或回复机器人者可触发;群 SKILL 用 JSON 卡片;群会话 10 分钟无新消息或 30 轮结束;会话与记忆本同用 SQLite;授权只读取 .19 凭据验证上游)。`[已定]`
-- 2026-10-30:`[已查证]` 上游 `http://141.11.76.101:8788/v1`(模型 `deepseek-v4.1-flash`)原生支持 Responses:非流式 `/responses` 返回 200 且含 reasoning 项;流式含 `response.created/output_item.added/function_call_arguments.delta|done/output_item.done/completed`;`function_call` → `function_call_output` 往返成功。仅小规模探测,未测:`previous_response_id`、`reasoning.effort`、`instructions`、`/responses/compact`、长上下文、并发与 429 行为、`apply_patch`/`shell` 等 Codex 专用工具类型。`/models` 返回含多个模型(本次未全量记录)。密钥只在远端读取,未输出。
+- 2026-10-30:`[已查证]` 上游 ``<legacy 上游端点>``(模型 `deepseek-v4.1-flash`)原生支持 Responses:非流式 `/responses` 返回 200 且含 reasoning 项;流式含 `response.created/output_item.added/function_call_arguments.delta|done/output_item.done/completed`;`function_call` → `function_call_output` 往返成功。仅小规模探测,未测:`previous_response_id`、`reasoning.effort`、`instructions`、`/responses/compact`、长上下文、并发与 429 行为、`apply_patch`/`shell` 等 Codex 专用工具类型。`/models` 返回含多个模型(本次未全量记录)。密钥只在远端读取,未输出。
 - 2026-10-30:纳入第十六轮(工程约定:Python 3.12+、uv + pyproject + uv.lock、TOML 配置并独立 secrets、src/cgbot 包布局单进程 asyncio、pytest + pytest-asyncio + ruff + 类型检查)。详见 [reference/engineering-conventions.md](reference/engineering-conventions.md)。`[已定]`
-- 2026-10-30:纳入第十七轮(用户确认 R0.2 的模块划分、日志不记正文、密钥 0600、pyright;授权自行修改 NapCat 配置新增反向 WS)。`[已定]` 已执行:在 192.168.1.19 的 `/home/klp/qqbot/napcat/config/onebot11_1059657671.json` 的 `websocketClients` 新增条目 `cgbot`(`ws://192.168.1.11:6200/ws`,array 格式,token 空,心跳/重连 30000ms);原条目 `rws`→`astrbot:6199` 未动;备份 `onebot11_1059657671.json.bak-cgbot`。**未重启/未解除暂停**:NapCat 容器仍为 Paused,配置要在 NapCat 恢复运行后才生效;恢复运行须用户授权。`input_status` 与反向 WS 实测(R0.1-T04/T05)依赖此,尚未执行。
+- 2026-10-30:纳入第十七轮(用户确认 R0.2 的模块划分、日志不记正文、密钥 0600、pyright;授权自行修改 NapCat 配置新增反向 WS)。`[已定]` 已执行:在 legacy 主机 的 `legacy 部署目录/napcat/config/onebot11_<QQ号>.json` 的 `websocketClients` 新增条目 `cgbot`(`ws://开发机:6200/ws`,array 格式,token 空,心跳/重连 30000ms);原条目 `rws`→`astrbot:6199` 未动;备份 `onebot11_<QQ号>.json.bak-cgbot`。**未重启/未解除暂停**:NapCat 容器仍为 Paused,配置要在 NapCat 恢复运行后才生效;恢复运行须用户授权。`input_status` 与反向 WS 实测(R0.1-T04/T05)依赖此,尚未执行。
 - 2026-10-30:纳入第十八轮(用户决定:恢复 NapCat 做实测;旧功能中视频抽帧、搜索、表情包、梗百科**移植**到新框架,之后不再由 AstrBot 提供服务;群消息**缓冲最近 30 条**供主动回话看上下文;唤醒词初始为"大肥鱼";"最常用入口"按消息条数统计)。`[已定]`
-- 2026-10-30:`[已查证]` 已执行 `docker unpause napcat`(NapCat 现为 Up;AstrBot 等仍 Paused)。NapCat 未热加载新增的 `websocketClients` 条目(touch 配置文件无效),新条目需重启 NapCat 或经 WebUI 重载才会生效。本机(192.168.1.11)6200 端口 .19 连不通(疑似本机防火墙),故临时探测监听改在 .19 上(`/tmp/cgprobe`,仅记录事件元数据、不记正文),条目 URL 临时改为 `ws://192.168.1.19:6200/ws`;正式地址随部署位置另定。实测前 NapCat 恢复时回灌了积压的群消息,日志含群聊正文,调研时不得再读取。
+- 2026-10-30:`[已查证]` 已执行 `docker unpause napcat`(NapCat 现为 Up;AstrBot 等仍 Paused)。NapCat 未热加载新增的 `websocketClients` 条目(touch 配置文件无效),新条目需重启 NapCat 或经 WebUI 重载才会生效。本机(开发机)6200 端口 .19 连不通(疑似本机防火墙),故临时探测监听改在 .19 上(`/tmp/cgprobe`,仅记录事件元数据、不记正文),条目 URL 临时改为 `ws://legacy 主机:6200/ws`;正式地址随部署位置另定。实测前 NapCat 恢复时回灌了积压的群消息,日志含群聊正文,调研时不得再读取。
 - 2026-10-30:`[已查证]` 经授权已 `docker restart napcat`(QQ 自动恢复登录),新反向 WS 条目连接成功:握手头 `x-self-id`/`x-client-role: Universal`、首事件 `meta_event.lifecycle.connect`、30 秒 `heartbeat`、动作 `get_login_info` 带 `echo` 返回 `ok/0` 且回带 `echo`。探测监听仍在 .19 的 `/tmp/cgprobe`(仅记元数据),待 `input_status` 实测后停止并清理。
-- 2026-10-30:`[已查证]` input_status 实测(两个样本):`event_type` 1 与 2 交替,`status_text`="对方正在输入...",`group_id=0`,间隔约 5 秒,无停止事件。**推送间隔约 5 秒,与"最后推送后 5 秒"的等待同量级,存在边界竞态风险**(两次推送之间恰好 ≥5 秒就会误判为停止),R2.1 须据更多样本评估(例如等待略长于推送间隔,或按 `event_type` 区分);此为待用户决定。探测监听已停止并清理,NapCat 的 `cgbot` 条目仍指向 `ws://192.168.1.19:6200/ws`(当前无监听,会重试报错)。
+- 2026-10-30:`[已查证]` input_status 实测(两个样本):`event_type` 1 与 2 交替,`status_text`="对方正在输入...",`group_id=0`,间隔约 5 秒,无停止事件。**推送间隔约 5 秒,与"最后推送后 5 秒"的等待同量级,存在边界竞态风险**(两次推送之间恰好 ≥5 秒就会误判为停止),R2.1 须据更多样本评估(例如等待略长于推送间隔,或按 `event_type` 区分);此为待用户决定。探测监听已停止并清理,NapCat 的 `cgbot` 条目仍指向 `ws://legacy 主机:6200/ws`(当前无监听,会重试报错)。
 - 2026-10-30:纳入第十九轮(用户决定:输入等待仍为最后一次推送后 5 秒,接受边界误判;不再追加 R0.1 的实测,`set_input_status`/断线重连留作后续;授权开始 M1 代码实现)。`[已定]`
 - 2026-10-30:纳入第二十轮(用户决定,`[已定]`):①**供应商层同时兼容 Chat Completions 与 Responses,默认 Responses,不得只支持 Responses**;此前对 `:8788` 的 Responses 探测是为 Codex(gateway 透传),不是为框架本体,§13.6c "主 Agent 统一 Responses"不再作为推论。②**存储拆分**:用户资料与配置相关(身份、入口等)一个 SQLite;聊天记录(会话)一个 SQLite;其余每个模块各一个 SQLite(调度器、记忆本等),不再共用单库(取代第十五轮"会话与记忆本同库")。③调度器系统事件:失败**最多重试 5 次**,单次处理**超时 30 秒**。
 - 2026-10-31:用户决定(`[已定]`):私聊范围可对**所有真实 QQ 好友**开放,新增配置 `[scope] all_friends = true`(默认 false)。判定依据为 NapCat 私聊事件 `sub_type == "friend"`,临时会话(群成员发起)不算好友;`friends` 白名单仍有效且为并集。群聊范围不变(仍为固定群号)。输入状态事件无 `sub_type`,开启该项时仅对已有身份(已由真实好友私聊建立)的用户生效。§12.1 测试范围原文保留,本条为其后的变更。
 - 2026-11-05:用户决定(`[已定]`):**聊天须支持多模态图片输入**(用户报告"聊天从不把图片交给模型"为缺陷)。详见 §13.2b。
 - 2026-11-05:用户批准(`[已定]`):模型失败时私聊通知用户、群聊只记日志;供应商层增加有界重试。见 §6。
-- 2026-11-05:用户决定(`[已定]`):时区可配置。新增配置 `[group] timezone`(IANA 名,默认 `Asia/Kuala_Lumpur`,启动时用 zoneinfo 校验,非法即配置错误)。群门控的本地小时与日志时间戳均显式使用该时区,不再依赖进程 `TZ`(`GroupGate` 的 `tz` 改为必填);部署的 `TZ` 由 `Asia/Shanghai` 改为 `Asia/Kuala_Lumpur` 以保持一致。此前 R3.1 待决的"时区"由此收束。
+- 2026-11-05:用户决定(`[已定]`):时区可配置。新增配置 `[group] timezone`(IANA 名,默认 `<旧默认时区>`,启动时用 zoneinfo 校验,非法即配置错误)。群门控的本地小时与日志时间戳均显式使用该时区,不再依赖进程 `TZ`(`GroupGate` 的 `tz` 改为必填);部署的 `TZ` 由 `Asia/Shanghai` 改为 `<旧默认时区>` 以保持一致。此前 R3.1 待决的"时区"由此收束。
 - 2026-11-05:用户决定(`[已定]`):模型所见的每条用户消息与每条机器人消息都带 LLM 可读的时间戳,使模型知道"现在"(最新一条)与消息间隔。见 §13.2c。
+- 2026-11-11:用户决定(`[已定]`):移除个人数据以准备开源。**角色卡系统**:人格从硬编码改为 Markdown 文件,开头为 `---` 包裹的 YAML 格式 frontmatter(定义 `name` 必填、`wake_keywords` 可选列表),下方为人格文本。配置 `[persona] card` 相对配置目录(省略 = 内置默认卡);进程启动时读取一次,修改需重启(提示词缓存稳定性);`{owner_id}` 占位符在启动时由 `[scope] owner` 注入(无 owner 时为 "owner")。卡的 `wake_keywords` 作为 `[group] wake_keywords` 的默认值(配置可覆盖)。默认时区由 `<旧默认时区>` 改为 `UTC`;`Dockerfile` 的 `TZ` 同步改为 `UTC`;测试全部使用 `Asia/Shanghai`(中性示例)。文档新增 `docs/reference/character-card.md`(语法、重启语义、与配置的关系)。

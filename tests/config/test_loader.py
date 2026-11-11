@@ -576,12 +576,10 @@ def test_retry_invalid_values_are_named(
     assert info.value.key == key
 
 
-def test_timezone_defaults_to_kuala_lumpur_and_accepts_iana_name(
-    tmp_path: Path, secrets_file: Path
-) -> None:
-    assert load_with(tmp_path, BASE_TOML, secrets_file).group.timezone == "Asia/Kuala_Lumpur"
-    toml = BASE_TOML + '\n[group]\ntimezone = "UTC"\n'
-    assert load_with(tmp_path, toml, secrets_file).group.timezone == "UTC"
+def test_timezone_defaults_to_utc_and_accepts_iana_name(tmp_path: Path, secrets_file: Path) -> None:
+    assert load_with(tmp_path, BASE_TOML, secrets_file).group.timezone == "UTC"
+    toml = BASE_TOML + '\n[group]\ntimezone = "Asia/Shanghai"\n'
+    assert load_with(tmp_path, toml, secrets_file).group.timezone == "Asia/Shanghai"
 
 
 @pytest.mark.parametrize("value", ['"Mars/Olympus"', '""', '"../etc/passwd"', "5"])

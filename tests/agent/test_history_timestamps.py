@@ -16,7 +16,7 @@ from cgbot.session import Item, Kind
 from cgbot.timefmt import format_stamp, time_instruction
 from cgbot.vision import message_with_images
 
-KL = ZoneInfo("Asia/Kuala_Lumpur")
+KL = ZoneInfo("Asia/Shanghai")
 SID = "private:u1"
 # 2026-11-05 01:41 UTC = 09:41 in Kuala Lumpur (UTC+8), a Thursday.
 T1 = datetime(2026, 11, 5, 1, 41, tzinfo=UTC).timestamp()
@@ -67,7 +67,7 @@ def test_format_is_local_minute_precision_with_chinese_weekday() -> None:
 
 def test_time_instruction_names_the_zone() -> None:
     note = time_instruction(KL)
-    assert "方括号时间" in note and "Asia/Kuala_Lumpur" in note
+    assert "方括号时间" in note and "Asia/Shanghai" in note
 
 
 def test_each_user_message_and_reply_output_carries_its_own_time() -> None:

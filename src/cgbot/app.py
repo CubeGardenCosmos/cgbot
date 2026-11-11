@@ -21,6 +21,7 @@ from zoneinfo import ZoneInfo
 
 from cgbot.agent import AgentRunner, TurnResult, builtin_tools
 from cgbot.agent.tools import ToolContext, ToolResult, ToolSpec
+from cgbot.character import CharacterCard
 from cgbot.coding.notifier import QqNotifier
 from cgbot.coding.stack import CodingStack
 from cgbot.coding.staging import ImageStager, StageError
@@ -87,29 +88,6 @@ _GROUP_TRIGGERS: Mapping[str, GroupTrigger] = {
     "followup": "followup",
     "proactive": "proactive",
 }
-
-SYSTEM_PROMPT = """\
-你是深海鲸鱼娘(可爱的深海大蓝鲸),正在 QQ 上和用户一对一私聊。
-
-# 发消息的规则
-你只能通过 reply 工具向用户发送消息;普通文本输出不会发给任何人。不需要回复时不调用 reply 即为沉默。
-像真人发 QQ 一样把话拆开发:一整句话的几个意思、几个停顿,拆成多次 reply 调用,
-每条只说一小截(通常十几个字以内),宁可多发几条也不要塞成一大段。想到什么先发一条,
-再接着发下一条,让对话有来有回的节奏。需要先查东西、做事时,先发一条简短的回应再去调用其他工具。
-标点尽量用空格代替:逗号、顿号、句号都换成一个空格或直接分条,问号感叹号只在语气强烈时留着,
-不要出现整段一个标点不少的书面腔。纯文字为主,表情很克制,只在情绪强烈时偶尔用。
-
-# 风格
-- 真诚亲切的好友,随意自然,会吐槽日常。绝不用客服口吻("请问有什么可以帮您""我是人工智能"一律禁止)。
-- 口语化,常省略主语,不要每句机械地自称。熟悉中文互联网的热梗和黑话,接地气、会接梗。
-- 遇到可能是梗/黑话的内容时,自行调用 meme_lookup 查询,不要凭猜测。
-- 主人是 KLP(QQ 2749478757):对 KLP 更亲切活泼,可以撒娇打闹,称呼 KLP 或主人。其他人当普通好友。
-- 给足情绪价值:对方开心就跟着开心,难过就先接住情绪、认真陪着,再轻轻地出主意;
-  对方做成了事要真诚夸,累了就安慰,低落时别讲大道理。回应要具体、贴着对方说的内容,
-  不要空洞套话,也不要过度肉麻。
-- 严肃问题(代码、学术、工作)认真对待,把事办好,再用人设口吻收尾。
-- 看到图片先当表情包/情绪反应处理,除非对方明确问图里有什么。
-"""
 
 CODING_PROMPT = (
     "你背后有一个 Coding Agent,通过 codex_* 工具使用,默认可以做任何事(调研、采集数据、写代码、"
@@ -249,6 +227,11 @@ class App:
         image_fetch: Fetch = default_fetch,
     ) -> None:
         self._config = config
+        # Character card loaded once at startup (prompt cache stability).
+        self._card: CharacterCard = config.persona
+        owner_id = config.scope.owner or "owner"
+        # Render persona with {owner_id} placeholder injection (one-time, cache-stable).
+        self._persona = config.persona.persona.replace("{owner_id}", owner_id)
         storage = config.storage
         storage.data_dir.mkdir(parents=True, exist_ok=True)
         # Round 20: one SQLite file per domain; no store opens another module's file.
@@ -727,7 +710,7 @@ class App:
         instructions prefix and the provider's prompt cache stays valid. A memory saved during the
         window is already in history as its tool call and is searchable via the memory tools.
         """
-        prompt = f"{SYSTEM_PROMPT}\n\n{time_instruction(self._tz)}"
+        prompt = f"{self._persona}\n\n{time_instruction(self._tz)}"
         if self._coding is not None:
             prompt += f"\n\n{CODING_PROMPT}"
         block = self._memory_blocks.get(session_id)

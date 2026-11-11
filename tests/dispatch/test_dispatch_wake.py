@@ -103,7 +103,7 @@ def make_runner(store: AsyncSessionStore, provider: GatedProvider) -> AgentRunne
         tools=builtin_tools(),
         instructions="be brief",
         sender=_send,
-        tz=ZoneInfo("Asia/Kuala_Lumpur"),
+        tz=ZoneInfo("Asia/Shanghai"),
     )
 
 

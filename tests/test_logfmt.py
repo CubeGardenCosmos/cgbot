@@ -17,7 +17,7 @@ def test_timestamps_use_configured_zone_not_process_tz(monkeypatch: pytest.Monke
         record = logging.LogRecord("cgbot.x", logging.INFO, __file__, 1, "hello", None, None)
         record.created = datetime(2026, 10, 29, 19, 0, 0, tzinfo=UTC).timestamp()
         record.msecs = 123.0
-        line = ZonedFormatter(ZoneInfo("Asia/Kuala_Lumpur")).format(record)
+        line = ZonedFormatter(ZoneInfo("Asia/Shanghai")).format(record)
     finally:
         monkeypatch.undo()
         time.tzset()

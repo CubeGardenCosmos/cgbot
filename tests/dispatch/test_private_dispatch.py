@@ -140,7 +140,7 @@ def make_runner(
         tools=tools if tools is not None else builtin_tools(),
         instructions="be brief",
         sender=_send,
-        tz=ZoneInfo("Asia/Kuala_Lumpur"),
+        tz=ZoneInfo("Asia/Shanghai"),
     )
 
 

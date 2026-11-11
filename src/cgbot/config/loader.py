@@ -36,6 +36,7 @@ from cgbot.voice.config import load_voice_config
 
 if TYPE_CHECKING:
     # Type-only: coding/config.py imports cgbot.config.settings (see _coding for the lazy import).
+    from cgbot.character import CharacterCard
     from cgbot.coding.config import CodingConfig, ImageGenConfig
 
 SECRETS_FILE_ENV: Final = "CGBOT_SECRETS_FILE"
@@ -78,8 +79,9 @@ def load_config(
 
     napcat = _napcat(root.sub("napcat", required=True), source)
     scope = _scope(root.sub("scope"))
+    persona = _persona(root.sub("persona"), config_path.parent)
     provider = _provider(root.sub("provider", required=True), source)
-    group = _group(root.sub("group"))
+    group = _group(root.sub("group"), persona.wake_keywords)
     storage = _storage(root.sub("storage"), config_path.parent)
     logging_cfg = _logging(root.sub("logging"))
     search = _search(root.sub("search"), source)
@@ -92,6 +94,7 @@ def load_config(
         scope=scope,
         provider=provider,
         group=group,
+        persona=persona,
         storage=storage,
         logging=logging_cfg,
         search=search,
@@ -210,8 +213,9 @@ def _vision(t: _Table) -> VisionConfig:
     return vision
 
 
-def _group(t: _Table) -> GroupConfig:
-    wake = t.text_list("wake_keywords", ("大肥鱼",))
+def _group(t: _Table, card_wake_keywords: tuple[str, ...]) -> GroupConfig:
+    # Default to card's wake_keywords if not specified in config
+    wake = t.text_list("wake_keywords", card_wake_keywords)
     mute = t.text_list("mute_keywords", ())
     defaults = GroupConfig(wake_keywords=wake, mute_keywords=mute)
     group = GroupConfig(
@@ -239,8 +243,21 @@ def _timezone(t: _Table, default: str) -> str:
     try:
         ZoneInfo(name)
     except (ZoneInfoNotFoundError, ValueError, OSError) as exc:
-        raise t.error("timezone", "须为有效的 IANA 时区名,例:Asia/Kuala_Lumpur") from exc
+        raise t.error("timezone", "须为有效的 IANA 时区名,例:Asia/Shanghai 或 UTC") from exc
     return name
+
+
+def _persona(t: _Table, config_dir: Path) -> CharacterCard:
+    from cgbot.character import DEFAULT_CARD, load_character_card
+
+    card_path = t.text_or("card", "")
+    t.close()
+    if not card_path:
+        # Use built-in default card
+        return DEFAULT_CARD
+    # Resolve relative to config directory
+    full_path = config_dir / card_path
+    return load_character_card(full_path)
 
 
 def _storage(t: _Table, base_dir: Path) -> StoragePaths:

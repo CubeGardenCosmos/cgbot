@@ -107,7 +107,7 @@ class ScriptedProvider:
         raise NotImplementedError
 
 
-TZ = ZoneInfo("Asia/Kuala_Lumpur")
+TZ = ZoneInfo("Asia/Shanghai")
 
 _STAMP_PART = re.compile(r"\[\d{4}-\d\d-\d\d \d\d:\d\d 周.\] ")
 

@@ -16,7 +16,7 @@ from cgbot.provider import (
 from cgbot.session import AsyncSessionStore
 
 SID = "private:u1"
-TZ = ZoneInfo("Asia/Kuala_Lumpur")
+TZ = ZoneInfo("Asia/Shanghai")
 
 
 class FakeProvider:

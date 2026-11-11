@@ -22,6 +22,7 @@ File format (see ``config.example.toml`` at the repo root for a commented copy):
 - ``[storage]``: ``data_dir`` (default ``data``, relative to the config file's directory). It
   holds one SQLite file per domain: ``profile.sqlite`` (identity/channels), ``sessions.sqlite``
   (chat records), ``scheduler.sqlite``, and ``<module>.sqlite`` for later modules.
+- ``[persona]``: ``card`` (path relative to config dir, default ``characters/default.md``).
 - ``[group]``: ``wake_keywords`` (default ``["大肥鱼"]``), ``mute_keywords`` (default empty).
 - ``[search]``: web engines and limits; ``[search.gemini]`` (``enabled`` default false,
   ``base_url`` required http(s) when enabled, ``model``, ``timeout_seconds`` 90) enables

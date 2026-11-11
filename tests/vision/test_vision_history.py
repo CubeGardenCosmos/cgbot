@@ -20,7 +20,7 @@ from cgbot.timefmt import format_stamp
 from cgbot.vision import ImageIntake, ImageStore, message_with_images
 
 URL = "https://img.example/{}.jpg"
-TZ = ZoneInfo("Asia/Kuala_Lumpur")
+TZ = ZoneInfo("Asia/Shanghai")
 
 
 def _rows(*texts_and_refs: tuple[str, list[str]]) -> list[Item]:

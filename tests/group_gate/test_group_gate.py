@@ -424,7 +424,7 @@ async def test_local_hours_use_configured_zone_not_process_tz(
     monkeypatch.setenv("TZ", "America/Los_Angeles")
     time.tzset()
     try:
-        harness = Harness(tmp_path / "s.sqlite", tz=ZoneInfo("Asia/Kuala_Lumpur"))
+        harness = Harness(tmp_path / "s.sqlite", tz=ZoneInfo("Asia/Shanghai"))
         # 19:00Z is 03:00 in Kuala Lumpur (sleep) and 12:00 in Los Angeles.
         at_three = datetime(2026, 10, 29, 19, 0, tzinfo=UTC).timestamp()
         # 01:00Z is 09:00 in Kuala Lumpur (awake) and 18:00 the previous day in Los Angeles.

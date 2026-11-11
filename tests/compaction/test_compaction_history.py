@@ -7,7 +7,7 @@ from cgbot.agent.history import COMPACTION_PREFIX, expand_window, to_input_items
 from cgbot.provider import user_message
 from cgbot.session import Item
 
-TZ = ZoneInfo("Asia/Kuala_Lumpur")
+TZ = ZoneInfo("Asia/Shanghai")
 
 
 def _row(seq: int, kind: str, payload: dict[str, Any]) -> dict[str, Any]:
