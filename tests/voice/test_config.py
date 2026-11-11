@@ -37,7 +37,7 @@ def test_full_tcp_table_parses() -> None:
             "ffmpeg": " /usr/bin/ffmpeg ",
             "media_timeout_seconds": 12,
             "asr": {
-                "host": "192.168.1.19",
+                "host": "192.0.2.10",
                 "port": 20095,
                 "connect_timeout_seconds": 2,
                 "request_timeout_seconds": 45.5,
@@ -47,27 +47,25 @@ def test_full_tcp_table_parses() -> None:
             "tts": {
                 "port": 20096,
                 "language": "zh",
-                "path_rules": [
-                    {"remote": "/AstrBot/data/temp", "local": "/home/klp/qqbot/data/temp"}
-                ],
+                "path_rules": [{"remote": "/AstrBot/data/temp", "local": "/srv/qqbot/data/temp"}],
             },
         }
     )
     assert cfg.ffmpeg == "/usr/bin/ffmpeg"
     assert cfg.media_timeout == 12.0
-    assert cfg.asr.endpoint.describe() == "tcp:192.168.1.19:20095"
+    assert cfg.asr.endpoint.describe() == "tcp:192.0.2.10:20095"
     assert cfg.asr.max_connections == 3
     assert cfg.asr.request_timeout == 45.5
     assert cfg.asr_language == "zh"
     assert cfg.tts.endpoint.describe() == "tcp:127.0.0.1:20096"
     assert len(cfg.path_rules) == 1
     assert cfg.path_rules[0].remote_prefix == "/AstrBot/data/temp"
-    assert cfg.path_rules[0].local_prefix == "/home/klp/qqbot/data/temp"
+    assert cfg.path_rules[0].local_prefix == "/srv/qqbot/data/temp"
 
 
 def test_unix_socket_endpoint_parses() -> None:
-    cfg = load_voice_config({"asr": {"unix_path": "/home/klp/qqbot/data/funasr.sock"}})
-    assert cfg.asr.endpoint.describe() == "unix:/home/klp/qqbot/data/funasr.sock"
+    cfg = load_voice_config({"asr": {"unix_path": "/srv/qqbot/data/funasr.sock"}})
+    assert cfg.asr.endpoint.describe() == "unix:/srv/qqbot/data/funasr.sock"
 
 
 @pytest.mark.parametrize(

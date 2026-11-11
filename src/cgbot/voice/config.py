@@ -11,7 +11,7 @@ TOML shape::
     media_timeout_seconds = 30
 
     [voice.asr]                        # FunASR daemon
-    host = "127.0.0.1"                 # or: unix_path = "/home/klp/qqbot/data/funasr.sock"
+    host = "127.0.0.1"                 # or: unix_path = "/srv/qqbot/data/funasr.sock"
     port = 10095
     connect_timeout_seconds = 5
     request_timeout_seconds = 60
@@ -19,13 +19,13 @@ TOML shape::
     language = "auto"
 
     [voice.tts]                        # SoVITS daemon
-    host = "127.0.0.1"                 # or: unix_path = "/home/klp/qqbot/data/sovits.sock"
+    host = "127.0.0.1"                 # or: unix_path = "/srv/qqbot/data/sovits.sock"
     port = 10096
     connect_timeout_seconds = 5
     request_timeout_seconds = 180
     max_connections = 1
     language = "zh"
-    path_rules = [{ remote = "/AstrBot/data", local = "/home/klp/qqbot/data" }]
+    path_rules = [{ remote = "/AstrBot/data", local = "/srv/qqbot/data" }]
 """
 
 from __future__ import annotations

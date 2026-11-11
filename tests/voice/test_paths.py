@@ -37,10 +37,10 @@ def test_first_candidate_that_resolves_wins(tmp_path: Path) -> None:
     mapper = PathMapper(
         [
             PathRule(remote_prefix="/AstrBot/data/temp", local_prefix=str(tmp_path / "missing")),
-            PathRule(remote_prefix="/home/klp/qqbot/data/temp", local_prefix=str(host_dir)),
+            PathRule(remote_prefix="/srv/qqbot/data/temp", local_prefix=str(host_dir)),
         ]
     )
-    resolved = mapper.resolve_wav("/home/klp/qqbot/data/temp/a.wav", "/AstrBot/data/temp/a.wav")
+    resolved = mapper.resolve_wav("/srv/qqbot/data/temp/a.wav", "/AstrBot/data/temp/a.wav")
     assert resolved == (host_dir / "a.wav").resolve()
 
 

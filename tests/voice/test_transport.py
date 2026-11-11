@@ -33,7 +33,7 @@ def test_unix_path_must_be_absolute_and_portless() -> None:
         Endpoint(unix_path="/tmp/a.sock", port=10095)
 
 
-@pytest.mark.parametrize("host", ["127.0.0.1", "::1", "192.168.1.19", "10.0.0.5"])
+@pytest.mark.parametrize("host", ["127.0.0.1", "::1", "192.0.2.10", "10.0.0.5"])
 def test_loopback_and_private_hosts_accepted(host: str) -> None:
     assert is_private_host(host)
     assert Endpoint(host=host, port=10095).describe() == f"tcp:{host}:10095"

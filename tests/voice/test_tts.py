@@ -40,11 +40,9 @@ async def test_synthesize_reads_wav_via_host_path(start_tcp: Starter, tmp_path: 
     temp = tmp_path / "temp"
     temp.mkdir()
     make_wav(temp / "a.wav")
-    mapper = PathMapper(
-        [PathRule(remote_prefix="/home/klp/qqbot/data/temp", local_prefix=str(temp))]
-    )
+    mapper = PathMapper([PathRule(remote_prefix="/srv/qqbot/data/temp", local_prefix=str(temp))])
     running = await start_tcp(
-        lambda req: _reply("/home/klp/qqbot/data/temp/a.wav", "/AstrBot/data/temp/a.wav")
+        lambda req: _reply("/srv/qqbot/data/temp/a.wav", "/AstrBot/data/temp/a.wav")
     )
     assert running.host is not None and running.port is not None
     result = await _tts(running.host, running.port, mapper).synthesize("你好")
@@ -64,7 +62,7 @@ async def test_falls_back_to_container_path(start_tcp: Starter, tmp_path: Path) 
     make_wav(temp / "b.wav")
     mapper = PathMapper([PathRule(remote_prefix="/AstrBot/data/temp", local_prefix=str(temp))])
     running = await start_tcp(
-        lambda req: _reply("/home/klp/qqbot/data/temp/b.wav", "/AstrBot/data/temp/b.wav")
+        lambda req: _reply("/srv/qqbot/data/temp/b.wav", "/AstrBot/data/temp/b.wav")
     )
     assert running.host is not None and running.port is not None
     result = await _tts(running.host, running.port, mapper).synthesize("hi")
