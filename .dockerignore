@@ -1,9 +1,11 @@
 # Allowlist: only what the bot image build needs. Secrets, local config, data, tests,
 # docs and the sandbox tree never enter the build context, except the music-synth skill text,
 # which the bot injects into prompts (one source: the same file the sandbox Codex reads).
+# README.md is required: pyproject.toml declares it as the package readme (hatchling build).
 *
 !pyproject.toml
 !uv.lock
+!README.md
 !src
 !sandbox/skills/music-synth/SKILL.md
 

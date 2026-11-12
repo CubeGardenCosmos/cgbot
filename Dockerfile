@@ -38,7 +38,7 @@ RUN set -eux; \
 RUN pip install --no-cache-dir --index-url "${PYPI_MIRROR}" "uv==${UV_VERSION}"
 
 WORKDIR /src
-COPY pyproject.toml uv.lock ./
+COPY pyproject.toml uv.lock README.md ./
 # Dependencies come from uv.lock (exported with per-file sha256 hashes) and are installed with
 # --require-hashes from the PyPI mirror. Reason: files.pythonhosted.org is not reachable from the
 # default build network (connect timeouts), while every hash in the lock still verifies each file.
