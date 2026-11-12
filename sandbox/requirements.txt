@@ -35,3 +35,4 @@ sqlalchemy
 cryptography
 playwright
 pytesseract
+mido==1.3.3

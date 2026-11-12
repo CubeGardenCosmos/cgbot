@@ -5,3 +5,6 @@
 **/__pycache__
 **/*.pyc
 **/.pytest_cache
+tools/cgmusic/build
+**/.venv
+**/uv.lock

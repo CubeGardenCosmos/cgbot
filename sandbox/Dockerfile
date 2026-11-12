@@ -1,6 +1,22 @@
 # cgbot-sandbox: per-user Codex app-server sandbox image.
 # Build context: the sandbox/ directory. bridge/ (bridge MCP) and skills/image-gen are produced
 # by their owning slices and copied in at build time.
+# ---- cgmusic-build: 编译 sandbox/tools/cgmusic(C++17/CMake) ----
+# 与最终镜像同为 Debian bookworm(node:22-bookworm-slim),动态库 ABI 一致,运行库见最终阶段 apt 层。
+FROM node:22-bookworm-slim AS cgmusic-build
+ENV DEBIAN_FRONTEND=noninteractive
+RUN node -e "const fs=require('node:fs'); const p='/etc/apt/sources.list.d/debian.sources'; fs.writeFileSync(p,fs.readFileSync(p,'utf8').replaceAll('deb.debian.org','mirrors.aliyun.com').replaceAll('security.debian.org','mirrors.aliyun.com'))" \
+    && printf '%s\n' 'Acquire::http::Proxy "DIRECT";' 'Acquire::https::Proxy "DIRECT";' > /etc/apt/apt.conf.d/99direct \
+    && apt-get update && apt-get install -y --no-install-recommends \
+      build-essential cmake pkg-config \
+      libfluidsynth-dev libebur128-dev libsndfile1-dev libmp3lame-dev libpugixml-dev libzip-dev \
+    && rm -rf /var/lib/apt/lists/*
+COPY tools/cgmusic /src/cgmusic
+RUN cmake -S /src/cgmusic -B /src/build -DCMAKE_BUILD_TYPE=Release \
+    && cmake --build /src/build --parallel \
+    && mkdir -p /out && cp /src/build/cgmusic /out/cgmusic && strip /out/cgmusic
+
+# ---- final image ----
 FROM node:22-bookworm-slim
 
 ARG CODEX_VERSION=0.166.0
@@ -30,6 +46,7 @@ RUN node -e "const fs=require('node:fs'); const p='/etc/apt/sources.list.d/debia
       ca-certificates curl git bash tini chromium fonts-noto-cjk fontconfig \
       python3 python3-markdown weasyprint xz-utils procps openssh-client netcat-openbsd \
       tesseract-ocr tesseract-ocr-eng tesseract-ocr-chi-sim imagemagick ffmpeg \
+      libfluidsynth3 libebur128-1 libsndfile1 libmp3lame0 libpugixml1v5 libzip4 \
     && rm -rf /var/lib/apt/lists/*
 
 COPY fontconfig/99-cgbot-cjk.conf /etc/fonts/conf.d/99-cgbot-cjk.conf
@@ -65,6 +82,20 @@ RUN python3 -m pip install --no-cache-dir --no-deps /opt/cgbot/tools/findata \
     && ln -sf "$(python3 -c 'import sysconfig; print(sysconfig.get_path("scripts"))')/findata" /usr/local/bin/findata \
     && findata --help >/dev/null
 
+COPY tools/cgdl /opt/cgbot/tools/cgdl
+RUN python3 -m pip install --no-cache-dir --no-deps /opt/cgbot/tools/cgdl \
+    && ln -sf "$(python3 -c 'import sysconfig; print(sysconfig.get_path("scripts"))')/cgdl" /usr/local/bin/cgdl \
+    && cgdl --help >/dev/null
+
+COPY tools/cgmidi /opt/cgbot/tools/cgmidi
+RUN python3 -m pip install --no-cache-dir --no-deps /opt/cgbot/tools/cgmidi \
+    && ln -sf "$(python3 -c 'import sysconfig; print(sysconfig.get_path("scripts"))')/cgmidi" /usr/local/bin/cgmidi \
+    && cgmidi --help >/dev/null
+
+# cgmusic:由 cgmusic-build 阶段编译的原生合成器;运行库在上面的 apt 层安装。
+COPY --from=cgmusic-build /out/cgmusic /usr/local/bin/cgmusic
+RUN ! ldd /usr/local/bin/cgmusic | grep -q 'not found'
+
 COPY tools/richdoc /opt/cgbot/tools/richdoc
 RUN cd /opt/cgbot/tools/richdoc \
     && npm ci --omit=dev --no-audit --no-fund \
@@ -79,6 +110,10 @@ COPY codex /opt/cgbot/codex
 COPY lsp/cclsp.json /opt/cgbot/lsp/cclsp.json
 COPY skills /opt/cgbot/skills
 COPY tools/findata/SKILL.md /opt/cgbot/skills/findata/SKILL.md
+
+# 音色挂载点:音色文件不进镜像,宿主机目录由 bot 以只读方式挂到 /opt/soundfonts
+# (见 docs/reference/soundfonts.md)。
+RUN mkdir -p /opt/soundfonts && chmod 0755 /opt/soundfonts
 
 RUN userdel node && useradd --uid 1000 --create-home --shell /bin/bash agent \
     && mkdir -p /workspace /home/agent \

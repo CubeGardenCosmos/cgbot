@@ -1,0 +1,43 @@
+# cgmusic
+
+原生 C++17 命令行工具:把 MIDI 或 MusicXML(含 .mxl)渲染为音频,经 FluidSynth 合成后按 EBU R128 处理(-14 LUFS,真峰值 ≤ -1.5 dBTP,去首尾静音,末尾淡出),输出 mp3 / wav / flac。
+
+## 构建依赖(Debian bookworm)
+
+`libfluidsynth-dev libebur128-dev libsndfile1-dev libmp3lame-dev`
+
+## 构建与测试
+
+```
+cmake -S . -B build && cmake --build build -j
+ctest --test-dir build --output-on-failure
+```
+
+## 用法
+
+```
+cgmusic render <file> [--soundfont ID|FILE] [--fmt mp3|wav|flac] [-o OUT] [--gain G] [--reverb CH=0-127]... [--reverb-room 0-1] [--reverb-level 0-1]
+cgmusic soundfonts
+cgmusic analyze <audio>
+```
+
+- stdout 输出一行 JSON;错误输出 `{"error":code,"message":...}` 到 stderr,退出码非 0。
+- 音色目录:环境变量 `CGMUSIC_SOUNDFONTS`,默认 `/opt/soundfonts`(只读)。
+- 默认输出目录 `/workspace/artifacts/music/`。
+- `--gain G`:相对 -14 LUFS 目标的 dB 偏移,限 ±12;真峰值上限仍为 -1.5 dBTP。
+- `--reverb CH=0-127`(可重复):MIDI 通道 1-16 的混响发送(CC91),优先级最高,覆盖文件中的 CC91 与默认表。
+- `--reverb-room`、`--reverb-level`:全局混响房间大小与电平,取值 0-1。
+- 声部电平平衡为内置固定规则,调用方不能修改:非鼓组声部按 -6 dB 基础电平加偏移后求和;鼓组的踢鼓(+6 dB)、军鼓(0 dB)、其他鼓件(-6 dB)为绝对增益,不叠加基础电平。
+- 发送量优先级:`--reverb` 覆盖 > 文件中显式的 CC91/CC93 > 内置默认表(cgmusic 自行调校,非 MuseScore 数值;MuseScore 不向 FluidSynth 发送混响)。文件中 tick 0 处值为 0 的 CC91/CC93 视为未设置,由默认表决定;显式设置一经出现即保持到文件末尾。
+- JSON 额外包含 `balance`(各声部偏移与实际增益)与 `reverb`(房间、电平、各通道最终发送量 `reverb_send`/`chorus_send` 及来源 `reverb_source`/`chorus_source`,取值 `cli`、`file`、`table`)。
+- 上限:MIDI 字节 8 MiB,播放时长 15 分钟(超出返回 `too_long`)。长乐谱会占用约为时长 × 44100 × 2 × 4 字节 × 3 的内存。
+
+## 依赖选择 / 库调研
+
+- 没有可直接使用的 MusicXML→MIDI 库:Debian bookworm 与 vcpkg 均无此类打包库。
+- Grame libmusicxml 功能完整,但未在 bookworm 打包,引入需自建第三方依赖,未采用。
+- Verovio 体量过大(渲染为主,面向排版),为转换 MIDI 引入它得不偿失,未采用。
+- libsmf 不需要:SMF 由 `src/musicxml.cpp` 直接按字节写出,解析端已有 `midi.cpp`。
+- 选定依赖:`libpugixml-dev`(解析 XML)与 `libzip-dev`(读取 .mxl 压缩包,内存读取、无临时文件)。
+- 已删除 `src/third_party/` 下的 vendored 副本,改由 CMake 通过 pkg-config 查找系统库。
+
