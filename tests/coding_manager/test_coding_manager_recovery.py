@@ -103,7 +103,7 @@ async def test_running_turn_vanishes_on_reconcile_timeout(make_rig: RigFactory) 
     # No thread_status is emitted; the reconcile window must expire on the clock.
     second = make_rig(clock=first.clock, server=first.server, reconcile_timeout=30.0)
     await second.manager.start()
-    await until(lambda: second.clock.sleepers > 0)
+    await settle()
     second.clock.advance(29.0)
     await settle()
     assert second.notifier.count("turn_failed") == 0

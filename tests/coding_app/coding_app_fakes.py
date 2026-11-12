@@ -55,9 +55,24 @@ class FakeService:
             raise self.error
 
     async def submit(
-        self, user_id: str, prompt: str, *, thread_id: str | None = None, title: str | None = None
+        self,
+        user_id: str,
+        prompt: str,
+        *,
+        thread_id: str | None = None,
+        title: str | None = None,
+        important: bool = False,
+        time_limit_minutes: float | None = None,
     ) -> SubmitResult:
-        self._record("submit", user_id, prompt=prompt, thread_id=thread_id, title=title)
+        self._record(
+            "submit",
+            user_id,
+            prompt=prompt,
+            thread_id=thread_id,
+            title=title,
+            important=important,
+            time_limit_minutes=time_limit_minutes,
+        )
         return self.submit_result
 
     async def list_threads(self, user_id: str) -> list[ThreadStatus]:

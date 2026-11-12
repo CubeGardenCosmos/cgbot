@@ -83,9 +83,25 @@ async def test_submit_strips_prompt_and_reports_started() -> None:
     assert not result.is_error
     name, user_id, kwargs = service.calls[0]
     assert (name, user_id) == ("submit", "1001")
-    assert kwargs == {"prompt": "写报告", "thread_id": None, "title": "论文"}
+    assert kwargs == {
+        "prompt": "写报告",
+        "thread_id": None,
+        "title": "论文",
+        "important": False,
+        "time_limit_minutes": None,
+    }
     assert "thread_id=t1" in result.output
     assert "已开始" in result.output
+
+
+async def test_important_budget_arguments_reach_service() -> None:
+    service = FakeService()
+    args = {"prompt": "x", "important": True, "time_limit_minutes": 5}
+    result = await _call(service, "codex_submit", args)
+    assert not result.is_error
+    kwargs = service.calls[0][2]
+    assert kwargs["important"] is True
+    assert kwargs["time_limit_minutes"] == 5.0
 
 
 async def test_blank_thread_id_on_submit_means_new_thread() -> None:
@@ -109,6 +125,10 @@ async def test_submit_reports_queue_position_when_queued() -> None:
         ({"prompt": "x" * (MAX_PROMPT_CHARS + 1)}, "prompt is longer"),
         ({"prompt": 5}, "prompt is required"),
         ({"prompt": "x", "title": "t" * (MAX_TITLE_CHARS + 1)}, "title is longer"),
+        ({"prompt": "x", "important": "yes"}, "important must be a boolean"),
+        ({"prompt": "x", "important": True, "time_limit_minutes": "5"}, "must be a number"),
+        ({"prompt": "x", "important": True, "time_limit_minutes": True}, "must be a number"),
+        ({"prompt": "x", "important": True, "time_limit_minutes": 0}, "must be a positive"),
     ],
 )
 async def test_submit_argument_validation(args: dict[str, object], fragment: str) -> None:

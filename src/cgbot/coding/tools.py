@@ -86,6 +86,17 @@ def _flag(args: dict[str, Any], key: str) -> bool:
     return value
 
 
+def _optional_minutes(args: dict[str, Any], key: str) -> float | None:
+    value = args.get(key)
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        raise _Refused(f"{key} must be a number")
+    if not 0 < value < float("inf"):
+        raise _Refused(f"{key} must be a positive number")
+    return float(value)
+
+
 def _read_limit(args: dict[str, Any]) -> int:
     value = args.get("limit", DEFAULT_READ_LIMIT)
     if not isinstance(value, int) or isinstance(value, bool):
@@ -163,14 +174,25 @@ def _make_submit(service: CodingService) -> ToolHandler:
         prompt = _required_text(args, "prompt", max_chars=MAX_PROMPT_CHARS)
         thread_id = _optional_text(args, "thread_id", max_chars=MAX_THREAD_ID_CHARS)
         title = _optional_text(args, "title", max_chars=MAX_TITLE_CHARS)
-        result = await service.submit(user_id, prompt, thread_id=thread_id, title=title)
+        important = _flag(args, "important")
+        time_limit_minutes = _optional_minutes(args, "time_limit_minutes")
+        result = await service.submit(
+            user_id,
+            prompt,
+            thread_id=thread_id,
+            title=title,
+            important=important,
+            time_limit_minutes=time_limit_minutes,
+        )
         if result.state == "started":
             state = "已开始"
         else:
             state = f"已排队（排队位置 {result.queue_position}）"
         return ToolResult(f"已提交 thread_id={result.thread_id}，{state}。结果稍后以通知送达。")
 
-    return _guarded(frozenset({"prompt", "thread_id", "title"}), run)
+    return _guarded(
+        frozenset({"prompt", "thread_id", "title", "important", "time_limit_minutes"}), run
+    )
 
 
 def _make_list(service: CodingService) -> ToolHandler:
@@ -306,13 +328,25 @@ def codex_tools(service: CodingService) -> tuple[ToolSpec, ...]:
             name="codex_submit",
             description=(
                 "把任务交给 Coding Agent 执行。不传 thread_id 时新开线程；传入时在该线程继续，"
-                "线程正在运行则指令排队。" + _NOTE
+                "线程正在运行则指令排队。"
+                "仅当任务严肃、且用户明确要求实时准确的时长时，才设 important=true，"
+                "并可用 time_limit_minutes 指定时长上限；普通任务不要设置这两项。" + _NOTE
             ),
             parameters_schema=_schema(
                 {
                     "prompt": {"type": "string", "description": "要执行的任务说明"},
                     "thread_id": _THREAD,
                     "title": {"type": "string", "description": "新线程的标题（可选）"},
+                    "important": {
+                        "type": "boolean",
+                        "description": "仅限严肃任务且用户确认需要实时准确时长时为 true；"
+                        "默认 false。true 时超时只提醒、不强制中断。",
+                    },
+                    "time_limit_minutes": {
+                        "type": "number",
+                        "description": "仅 important=true 时生效：本次任务时长上限（分钟，正数，"
+                        "不超过系统最大值）；important=false 时忽略。",
+                    },
                 },
                 required=("prompt",),
             ),

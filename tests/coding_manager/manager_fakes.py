@@ -8,7 +8,7 @@ from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 
-from cgbot.coding.config import ConcurrencyConfig
+from cgbot.coding.config import ConcurrencyConfig, TimeBudgetConfig
 from cgbot.coding.contracts import CodexEvent, CodingNotice, SandboxEndpoint, ThreadInfo
 from cgbot.coding.governor import ConcurrencyGovernor
 from cgbot.coding.manager import CodingManager
@@ -49,6 +49,19 @@ class FakeClock:
     @property
     def sleepers(self) -> int:
         return len(self._sleepers)
+
+
+class FakeTimebase:
+    """``Timebase`` view of a ``FakeClock``: ``now`` reads the clock, ``sleep`` parks on it."""
+
+    def __init__(self, clock: FakeClock) -> None:
+        self._clock = clock
+
+    def now(self) -> float:
+        return self._clock.now
+
+    async def sleep(self, seconds: float) -> None:
+        await self._clock.sleep(seconds)
 
 
 async def until(predicate: Callable[[], bool], rounds: int = 1000) -> None:
@@ -357,6 +370,7 @@ def build(
     config: ConcurrencyConfig = CONFIG,
     reconcile_timeout: float = 30.0,
     max_queue: int = 200,
+    time_budget: TimeBudgetConfig | None = None,
 ) -> Rig:
     """Assemble a manager over fakes. Pass the same clock/server/path to simulate a restart."""
     if clock is None:
@@ -378,6 +392,8 @@ def build(
         sleep=clock.sleep,
         reconcile_timeout=reconcile_timeout,
         max_queue=max_queue,
+        time_budget=time_budget if time_budget is not None else TimeBudgetConfig(),
+        timebase=FakeTimebase(clock),
     )
     return Rig(
         manager=manager,

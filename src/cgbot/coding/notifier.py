@@ -46,6 +46,7 @@ _HEADERS: dict[NoticeKind, str] = {
     "turn_interrupted": "任务已停止",
     "queue_started": "排队指令开始",
     "queue_dropped": "排队已清空",
+    "time_budget": "任务时限提醒",
 }
 _STATUSES: dict[ReportStatus, str] = {
     "running": "运行中",

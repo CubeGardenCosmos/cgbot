@@ -33,6 +33,15 @@ TOML shape (parsed by ``cgbot.config.loader`` into :class:`CodingConfig`)::
     degrade_window_seconds = 60
     recover_after_seconds = 3600
 
+    [coding.time_budget]
+    soft_target_seconds = 120
+    cap_seconds = 600
+    grace_seconds = 120
+    notice_interval_seconds = 60
+    approach_window_seconds = 120
+    approach_interval_seconds = 30
+    max_important_minutes = 60
+
     [coding.bridge]
     max_file_bytes = 536870912
     chunk_bytes = 2097152
@@ -96,6 +105,17 @@ class ConcurrencyConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class TimeBudgetConfig:
+    soft_target_seconds: float = 120.0
+    cap_seconds: float = 600.0
+    grace_seconds: float = 120.0
+    notice_interval_seconds: float = 60.0
+    approach_window_seconds: float = 120.0
+    approach_interval_seconds: float = 30.0
+    max_important_minutes: int = 60
+
+
+@dataclass(frozen=True, slots=True)
 class BridgeConfig:
     max_file_bytes: int
     chunk_bytes: int
@@ -124,3 +144,4 @@ class CodingConfig:
     bridge: BridgeConfig
     imagegen: ImageGenConfig | None
     upstream_api_key: Secret | None = None  # None = reuse [provider] api_key
+    time_budget: TimeBudgetConfig = TimeBudgetConfig()

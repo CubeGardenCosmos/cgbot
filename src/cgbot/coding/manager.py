@@ -18,6 +18,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable, Coroutine
 from contextlib import AsyncExitStack, asynccontextmanager
 from dataclasses import dataclass
 
+from cgbot.coding.config import TimeBudgetConfig
 from cgbot.coding.contracts import (
     CodexClient,
     CodexConnector,
@@ -33,6 +34,7 @@ from cgbot.coding.contracts import (
 )
 from cgbot.coding.governor import ConcurrencyGovernor
 from cgbot.coding.queue_store import QueueStore
+from cgbot.dispatch.timebase import SystemTimebase, Timebase
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +42,7 @@ MAX_START_ATTEMPTS = 3
 MEMO_LIMIT = 256
 TEXT_LIMIT = 4000
 RECONNECT_MAX_DELAY = 60.0
+BUDGET_RETRY_SECONDS = 5.0
 
 DEFAULT_DONE_TEXT = "（任务已完成，无文本输出）"
 DEFAULT_STOPPED_TEXT = "任务已停止"
@@ -47,6 +50,8 @@ DEFAULT_FAILED_TEXT = "任务执行失败"
 VANISHED_TEXT = "沙盒连接中断，运行中的任务状态丢失，已记为失败"
 START_FAILED_TEXT = "排队指令启动失败，已丢弃"
 QUEUE_STARTED_TEXT = "排队指令开始执行"
+TIME_BUDGET_PREFIX = "[系统时间预算] "
+TIME_BUDGET_CANCELLED_TEXT = "任务已超过非重要任务的硬上限及收尾宽限，系统已强制中断"
 
 PROGRESS_TIMEOUT = 90.0
 PROGRESS_EMPTY_TEXT = "（没有拿到进展文本）"
@@ -77,6 +82,8 @@ class _Job:
     prompt: str
     title: str | None
     announce: bool
+    important: bool = False
+    time_limit_minutes: float | None = None
     attempts: int = 0
 
 
@@ -85,6 +92,18 @@ class _Memo:
     title: str | None = None
     last_text: str | None = None
     updated_at: float = 0.0
+
+
+@dataclass(eq=False, slots=True)
+class _Budget:
+    turn_id: str
+    important: bool
+    cap_seconds: float
+    soft_seconds: float
+    offset: float  # seconds spent before ``base`` (restart recovery)
+    base: float  # timebase.now() when this budget's timer started
+    cancelled: bool = False
+    timer: asyncio.Task[None] | None = None
 
 
 @dataclass(eq=False, slots=True)
@@ -102,6 +121,7 @@ class _UserState:
         self.lock = asyncio.Lock()
         self.queue: deque[_Job] = deque()
         self.running: dict[str, str] = {}  # thread_id -> turn_id
+        self.budgets: dict[str, _Budget] = {}
         self.unverified: set[str] = set()  # running from before a session loss / restart
         self.awaiting: set[str] = set()  # resumed; waiting for a thread_status verdict
         self.memos: OrderedDict[str, _Memo] = OrderedDict()
@@ -137,6 +157,8 @@ class CodingManager:
         sleep: Sleep = asyncio.sleep,
         reconcile_timeout: float = 30.0,
         max_queue: int = 200,
+        time_budget: TimeBudgetConfig | None = None,
+        timebase: Timebase | None = None,
     ) -> None:
         if reconcile_timeout <= 0:
             raise ValueError("reconcile_timeout must be positive")
@@ -151,6 +173,8 @@ class CodingManager:
         self._sleep = sleep
         self._reconcile_timeout = reconcile_timeout
         self._max_queue = max_queue
+        self._time_budget = time_budget if time_budget is not None else TimeBudgetConfig()
+        self._timebase = timebase if timebase is not None else SystemTimebase()
         self._users: dict[str, _UserState] = {}
         self._tasks: set[asyncio.Task[None]] = set()
         self._recovery: asyncio.Task[None] | None = None
@@ -175,6 +199,8 @@ class CodingManager:
                     prompt=job.prompt,
                     title=job.title,
                     announce=True,
+                    important=job.important,
+                    time_limit_minutes=job.time_limit_minutes,
                 )
             )
             if job.title is not None:
@@ -182,6 +208,14 @@ class CodingManager:
         for turn in self._store.running_turns():
             user = self._user(turn.user_id)
             user.running[turn.thread_id] = turn.turn_id
+            self._arm_budget(
+                user,
+                turn.thread_id,
+                turn.turn_id,
+                turn.important,
+                turn.time_limit_minutes,
+                offset=max(0.0, self._clock() - turn.started_at),
+            )
             user.unverified.add(turn.thread_id)
         self._started = True
         for user in list(self._users.values()):
@@ -210,7 +244,18 @@ class CodingManager:
         *,
         thread_id: str | None = None,
         title: str | None = None,
+        important: bool = False,
+        time_limit_minutes: float | None = None,
     ) -> SubmitResult:
+        if time_limit_minutes is not None and not important:
+            time_limit_minutes = None
+        if time_limit_minutes is not None and not (
+            0 < time_limit_minutes <= self._time_budget.max_important_minutes
+        ):
+            raise CodingError(
+                "time_limit_minutes must be between 0 and "
+                f"{self._time_budget.max_important_minutes}"
+            )
         self._check_ready()
         user = self._user(user_id)
         if not prompt.strip():
@@ -229,8 +274,24 @@ class CodingManager:
                 info = await self._verify(session.client, thread)
                 memo = self._memo(user, thread)
                 memo.title = title or info.title or memo.title
-            seq = self._store.enqueue(user.user_id, thread, prompt, title, self._clock())
-            job = _Job(seq=seq, thread_id=thread, prompt=prompt, title=title, announce=False)
+            seq = self._store.enqueue(
+                user.user_id,
+                thread,
+                prompt,
+                title,
+                self._clock(),
+                important=important,
+                time_limit_minutes=time_limit_minutes,
+            )
+            job = _Job(
+                seq=seq,
+                thread_id=thread,
+                prompt=prompt,
+                title=title,
+                announce=False,
+                important=important,
+                time_limit_minutes=time_limit_minutes,
+            )
             user.queue.append(job)
             await self._dispatch_locked(user)
             if job in user.queue:
@@ -672,6 +733,7 @@ class CodingManager:
         """A turn that cannot be confirmed as running is recorded as failed (exactly once)."""
         if user.running.pop(thread_id, None) is None:
             return
+        self._stop_budget(user, thread_id)
         user.awaiting.discard(thread_id)
         user.unverified.discard(thread_id)
         self._store.finish_turn(user.user_id, thread_id)
@@ -700,12 +762,24 @@ class CodingManager:
         if thread is None or turn is None or user.running.get(thread) != turn:
             return
         del user.running[thread]
+        budget = user.budgets.get(thread)
+        cancelled = budget is not None and budget.cancelled
+        self._stop_budget(user, thread)
         user.unverified.discard(thread)
         user.awaiting.discard(thread)
         self._store.finish_turn(user.user_id, thread)
         kind, default_text = _TURN_END.get(event.status or "", _TURN_FAILED)
         text = (event.text or "").strip() or default_text
         memo = self._memo(user, thread)
+        if cancelled:
+            partial = (event.text or "").strip()
+            if not partial:
+                partial = (
+                    f"本次未返回文本结果；上一次记录的结果（非本次）：{memo.last_text}"
+                    if memo.last_text
+                    else "尚无文本结果，已有输出仍保留在线程中。"
+                )
+            text = f"{TIME_BUDGET_CANCELLED_TEXT}。\n已保留部分结果：{partial}"
         memo.last_text = text[:TEXT_LIMIT]
         memo.updated_at = self._clock()
         self._notify(user, kind, thread, text)
@@ -717,6 +791,163 @@ class CodingManager:
         user.awaiting.discard(thread)
         if not _is_active(event.params):
             self._vanish_locked(user, thread)
+
+    # ------------------------------------------------------------------ helpers: time budget
+
+    def _budget_cap(self, important: bool, time_limit_minutes: float | None) -> float:
+        if important and time_limit_minutes is not None:
+            return time_limit_minutes * 60.0
+        return self._time_budget.cap_seconds
+
+    def _arm_budget(
+        self,
+        user: _UserState,
+        thread_id: str,
+        turn_id: str,
+        important: bool,
+        time_limit_minutes: float | None,
+        *,
+        offset: float,
+    ) -> None:
+        """Start the single timer of an executing turn; ``offset`` is time spent before now."""
+        self._stop_budget(user, thread_id)
+        cap = self._budget_cap(important, time_limit_minutes)
+        budget = _Budget(
+            turn_id=turn_id,
+            important=important,
+            cap_seconds=cap,
+            soft_seconds=min(self._time_budget.soft_target_seconds, cap),
+            offset=offset,
+            base=self._timebase.now(),
+        )
+        user.budgets[thread_id] = budget
+        budget.timer = self._spawn(self._budget_loop(user.user_id, thread_id, budget))
+
+    def _budget_elapsed(self, budget: _Budget) -> float:
+        return budget.offset + self._timebase.now() - budget.base
+
+    @staticmethod
+    def _budget_current(user: _UserState, thread_id: str, budget: _Budget) -> bool:
+        return (
+            user.budgets.get(thread_id) is budget and user.running.get(thread_id) == budget.turn_id
+        )
+
+    @staticmethod
+    def _stop_budget(user: _UserState, thread_id: str) -> None:
+        budget = user.budgets.pop(thread_id, None)
+        if budget is None or budget.timer is None:
+            return
+        if budget.timer is not asyncio.current_task():
+            budget.timer.cancel()
+        budget.timer = None
+
+    def _periodic_interval(self, budget: _Budget, elapsed: float) -> float:
+        """Periodic interval in effect at ``elapsed``; sampled when a notice fires."""
+        config = self._time_budget
+        if elapsed >= budget.cap_seconds - config.approach_window_seconds:
+            return config.approach_interval_seconds
+        return config.notice_interval_seconds
+
+    def _next_budget_point(
+        self, budget: _Budget, done: set[str], next_periodic: float
+    ) -> tuple[float, str]:
+        """Next due point: a pending milestone (possibly already due) or the next periodic tick."""
+        config = self._time_budget
+        window_start = budget.cap_seconds - config.approach_window_seconds
+        points: list[tuple[float, int, str]] = []
+        if "soft" not in done:
+            points.append((budget.soft_seconds, 0, "soft"))
+        if "approach" not in done and window_start > 0:
+            points.append((window_start, 1, "approach"))
+        if "cap" not in done:
+            points.append((budget.cap_seconds, 2, "cap"))
+        if not budget.important and "hard" not in done:
+            points.append((budget.cap_seconds + config.grace_seconds, 3, "hard"))
+        points.append((next_periodic, 4, "periodic"))
+        due, _, kind = min(points)
+        return due, kind
+
+    def _budget_notice(self, budget: _Budget, elapsed: float, kind: str) -> str:
+        cap = budget.cap_seconds
+        if kind == "soft":
+            body = (
+                f"已运行 {elapsed:.0f} 秒，达到 {budget.soft_seconds:.0f} 秒软目标；"
+                f"距离 {cap:.0f} 秒上限还剩 {max(0.0, cap - elapsed):.0f} 秒。"
+                "请立即产出可用结果并结束，不要继续打磨。"
+            )
+        elif elapsed < cap:
+            body = (
+                f"已运行 {elapsed:.0f} 秒，距离 {cap:.0f} 秒上限还剩 "
+                f"{cap - elapsed:.0f} 秒。请收尾并返回已有结果。"
+            )
+        elif budget.important:
+            body = (
+                f"已运行 {elapsed:.0f} 秒，超过 {cap:.0f} 秒上限 {elapsed - cap:.0f} 秒。"
+                "请立即收尾并返回已有结果，不要继续扩展工作。"
+            )
+        else:
+            grace_left = max(0.0, cap + self._time_budget.grace_seconds - elapsed)
+            body = (
+                f"已达到 {cap:.0f} 秒硬上限，收尾宽限剩余 {grace_left:.0f} 秒。"
+                "立即返回已有结果，不得开启新检查。"
+            )
+        return TIME_BUDGET_PREFIX + body
+
+    async def _budget_loop(self, user_id: str, thread_id: str, budget: _Budget) -> None:
+        """Drive one turn's budget: notices generated by code; hard interrupt for ordinary tasks."""
+        done: set[str] = set()
+        if budget.soft_seconds >= budget.cap_seconds:
+            done.add("soft")
+        next_periodic = self._periodic_interval(budget, 0.0)
+        while True:
+            elapsed = self._budget_elapsed(budget)
+            due, kind = self._next_budget_point(budget, done, next_periodic)
+            if due > elapsed:
+                await self._timebase.sleep(due - elapsed)
+                continue
+            text = None if kind == "hard" else self._budget_notice(budget, elapsed, kind)
+            outcome = await self._budget_call(user_id, thread_id, budget, text=text)
+            if outcome == "stop":
+                return
+            if outcome == "retry":
+                await self._timebase.sleep(BUDGET_RETRY_SECONDS)
+                continue
+            if kind != "periodic":
+                done.add(kind)
+            fired_at = self._budget_elapsed(budget)
+            next_periodic = fired_at + self._periodic_interval(budget, fired_at)
+
+    async def _budget_call(
+        self, user_id: str, thread_id: str, budget: _Budget, *, text: str | None
+    ) -> str:
+        """Steer with ``text``, or hard-interrupt when ``text`` is None.
+
+        Returns ``"done"``, ``"stop"`` (the timer must end) or ``"retry"`` (try again later).
+        """
+        user = self._user(user_id)
+        async with self._locked(user):
+            if not self._budget_current(user, thread_id, budget):
+                return "stop"
+            try:
+                session = await self._ensure_session_locked(user)
+            except CodingError:
+                logger.warning("time budget: codex session unavailable; retrying")
+                return "retry"
+            if text is None:
+                budget.cancelled = True
+        try:
+            if text is None:
+                await session.client.turn_interrupt(thread_id=thread_id, turn_id=budget.turn_id)
+                return "stop"
+            await session.client.turn_steer(thread_id=thread_id, turn_id=budget.turn_id, text=text)
+        except Exception as exc:
+            budget.cancelled = False
+            logger.warning("time budget action failed (%s)", type(exc).__name__)
+            return "retry"
+        async with self._locked(user):
+            if self._budget_current(user, thread_id, budget):
+                self._notify(user, "time_budget", thread_id, text)
+        return "done"
 
     async def _dispatch_locked(self, user: _UserState) -> None:
         """Start queued instructions while a slot is free and their thread is idle."""
@@ -747,7 +978,19 @@ class CodingManager:
                 return
             user.queue.remove(job)
             user.running[job.thread_id] = turn_id
-            self._store.start_job(job.seq, user.user_id, job.thread_id, turn_id, self._clock())
+            started_at = self._clock()
+            self._store.start_job(
+                job.seq,
+                user.user_id,
+                job.thread_id,
+                turn_id,
+                started_at,
+                important=job.important,
+                time_limit_minutes=job.time_limit_minutes,
+            )
+            self._arm_budget(
+                user, job.thread_id, turn_id, job.important, job.time_limit_minutes, offset=0.0
+            )
             if job.announce:
                 self._notify(user, "queue_started", job.thread_id, QUEUE_STARTED_TEXT)
 

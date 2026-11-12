@@ -141,6 +141,7 @@ NoticeKind = Literal[
     "turn_interrupted",
     "queue_started",  # a queued instruction began running
     "queue_dropped",
+    "time_budget",  # system timer: remaining time / overrun
 ]
 ReportStatus = Literal["running", "waiting_user_input", "completed", "failed"]
 FileKind = Literal["image", "audio", "video", "file"]
@@ -199,7 +200,14 @@ class CodingService(Protocol):
     """What the codex_* tools call. ``user_id`` always comes from the event, never the model."""
 
     async def submit(
-        self, user_id: str, prompt: str, *, thread_id: str | None = None, title: str | None = None
+        self,
+        user_id: str,
+        prompt: str,
+        *,
+        thread_id: str | None = None,
+        title: str | None = None,
+        important: bool = False,
+        time_limit_minutes: float | None = None,
     ) -> SubmitResult: ...
 
     async def list_threads(self, user_id: str) -> list[ThreadStatus]: ...
