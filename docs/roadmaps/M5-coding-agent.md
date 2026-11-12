@@ -13,6 +13,7 @@
 | R5.5 | 回报桥接与大文件 | R5.2、R1.2、R1.6、R1.7;与 R5.3 联调 | report_progress 风格;单文件 512MB、2MB 切块、全链路流式,超限拒绝,临时文件可清理 | 待决策 | [TODO](../todos/R5.5-bridge-large-binary.md) |
 | R5.6 | Playwright 登录态与 Codex 子代理 | R5.2、R5.3 | 登录态每用户独立、主目录持久化、重建保留;框架不限制 Codex 子代理深度/并发 | 待决策 | [TODO](../todos/R5.6-playwright-subagents.md) |
 | R5.7 | omp_* 工具 | R1.3、R1.6、R1.7 | omp_add 式私聊录入与独立工具族;保留自身队列、账户额度、模糊目录解析 | 待决策 | [TODO](../todos/R5.7-omp-tools.md) |
+| R5.8 | 音乐合成(沙盒 cgmusic + bot 接线) | R5.2、R5.3、R5.4、R5.5、R1.8 | 私聊乐谱文件或关键词请求经沙盒 `cgmusic` 合成并回报音频;群聊不注入、不处理;音色目录只读挂载 | 进行中 | [TODO](../todos/R5.8-music-synth.md) |
 
 ## 待决策
 

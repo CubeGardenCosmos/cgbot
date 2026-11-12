@@ -247,6 +247,23 @@ class SearchConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class MusicConfig:
+    """``[music]``: 音乐合成(默认关闭)。合成在 Codex 沙盒内由 ``cgmusic`` 完成。
+
+    ``soundfont_dir`` 是宿主机路径,只读挂载为沙盒 ``/opt/soundfonts``;未配置时由加载器
+    取 ``[coding.docker] host_data_dir/soundfonts``(无 coding 时为 ``data_dir/soundfonts``)。
+    """
+
+    enabled: bool = False
+    soundfont_dir: Path = Path("data/soundfonts")
+    auto_download_soundfont: bool = True  # 启动时后台确保默认音色(失败只记日志)
+    auto_render_files: bool = True  # 私聊收到乐谱文件后自动提交一次渲染任务
+    max_file_bytes: int = 8 * 1024 * 1024
+    skill_ttl_seconds: float = 3600.0
+    musescore_enabled: bool = True  # 是否启用 Musescore 工具(搜索/预览,需 music.enabled)及技能说明
+
+
+@dataclass(frozen=True, slots=True)
 class Config:
     napcat: NapCatConfig
     scope: ScopeConfig
@@ -258,3 +275,4 @@ class Config:
     voice: VoiceConfig | None = None  # None: [voice] table absent, voice disabled
     coding: CodingConfig | None = None  # None: [coding] absent or enabled = false
     search: SearchConfig = field(default_factory=lambda: SearchConfig())
+    music: MusicConfig = field(default_factory=lambda: MusicConfig())

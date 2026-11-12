@@ -26,6 +26,7 @@ from cgbot.app import App
 from cgbot.config.settings import SearchGeminiConfig, SearchXConfig
 from cgbot.search import SearchService, search_tools
 from cgbot.search.gemini import GeminiSearchClient
+from cgbot.search.musescore import MuseScoreClient
 from cgbot.search.xsearch import XSearchService
 
 
@@ -126,9 +127,15 @@ async def test_enabled_gemini_client_uses_provider_key_and_is_shared_with_search
         *,
         gemini_client: GeminiSearchClient | None = None,
         x_service: XSearchService | None = None,
+        musescore_client: MuseScoreClient | None = None,
     ) -> list[ToolSpec]:
         received.append((service, gemini_client))
-        return search_tools(service, gemini_client=gemini_client, x_service=x_service)
+        return search_tools(
+            service,
+            gemini_client=gemini_client,
+            x_service=x_service,
+            musescore_client=musescore_client,
+        )
 
     monkeypatch.setattr(app_module, "search_tools", tools)
     clock = FakeTimebase()

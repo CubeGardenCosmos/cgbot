@@ -80,6 +80,9 @@ class _UserSandbox:
     last_used: float = 0.0
 
 
+SOUNDFONT_MOUNT = "/opt/soundfonts"
+
+
 class DockerSandboxProvider:
     """Implements :class:`cgbot.coding.contracts.SandboxProvider` on Docker."""
 
@@ -96,6 +99,7 @@ class DockerSandboxProvider:
         ready_timeout: float = 60.0,
         ready_interval: float = 1.0,
         reap_interval: float = 30.0,
+        soundfont_dir: Path | None = None,
     ) -> None:
         if not _PREFIX.fullmatch(config.docker.container_prefix):
             raise ValueError("docker.container_prefix must be a valid container-name prefix")
@@ -121,6 +125,7 @@ class DockerSandboxProvider:
         self._bridge_url = f"{base}/bridge"
         self._bot_host = urlsplit(base).hostname or ""
         self._data_dir = Path(config.docker.host_data_dir)
+        self._soundfont_dir = None if soundfont_dir is None else Path(soundfont_dir).absolute()
 
     # ------------------------------------------------------------------ public API
 
@@ -330,6 +335,10 @@ class DockerSandboxProvider:
             f"{workspace_dir(data, uid)}:/workspace:rw",
             f"{home_dir(data, uid)}:/home/agent:rw",
         ]
+        # 音色目录(宿主机路径)只读挂载;未启用音乐或目录不存在时不挂载,沙盒无需写入权限。
+        soundfonts = self._soundfont_dir
+        if soundfonts is not None and soundfonts.is_dir():
+            binds.append(f"{soundfonts}:{SOUNDFONT_MOUNT}:ro")
         network = self._config.docker.network
         return {
             "Image": self._config.docker.sandbox_image,

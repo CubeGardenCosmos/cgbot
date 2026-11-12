@@ -83,6 +83,10 @@ rsync -a --delete sandbox/ "$CGBOT_HOST:cgbot-build/sandbox/"   # 相对远端 $
 ssh "$CGBOT_HOST" 'docker build -t cgbot-sandbox:latest "$HOME/cgbot-build/sandbox"'
 ```
 
+含 `cgmusic` 的镜像首次构建较慢(编译 C++ 并安装 fluidsynth 等运行库)。构建后可做最小自检:`ssh "$CGBOT_HOST" docker run --rm --entrypoint cgmusic cgbot-sandbox:latest soundfonts`(目录未挂载时应输出 JSON 错误或空列表,而不是动态库缺失)。
+
+**音乐合成(`[music] enabled = true`)**:音色目录默认 `$CGBOT_HOST_DATA_DIR/soundfonts`(默认 `$HOME/cgbot-data/soundfonts`),bot 已把 `CGBOT_HOST_DATA_DIR` 以相同路径读写挂入容器,启动时自动创建并后台下载默认音色(约 38 MiB,经 bot 容器出站;失败只记日志,可用 `scripts/fetch_soundfonts.py --dir <目录>` 在宿主机手工补)。`deploy.sh --up` 重建 bot 后,空闲沙盒因挂载进入配置哈希而在下次使用时自动重建为新镜像;若沙盒正在运行,需待其空闲回收或 `docker stop cgbot-sbx-<id>`。详见 [soundfonts.md](soundfonts.md)。
+
 预期:`docker image inspect cgbot-sandbox:latest` 成功。失败:包镜像源不可达时按 [sandbox-image.md](sandbox-image.md) 调整 `ENV`。
 
 ### 3.5 写入 config.toml 与 secrets.toml

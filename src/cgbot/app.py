@@ -24,7 +24,7 @@ from cgbot.agent.tools import ToolContext, ToolResult, ToolSpec
 from cgbot.character import CharacterCard
 from cgbot.coding.notifier import QqNotifier
 from cgbot.coding.stack import CodingStack
-from cgbot.coding.staging import ImageStager, StageError
+from cgbot.coding.staging import ImageStager, ScoreStager, StageError
 from cgbot.compaction import Compactor
 from cgbot.config import Config
 from cgbot.dispatch import PrivateDispatcher, PrivateMessage, Timebase
@@ -45,6 +45,9 @@ from cgbot.model import (
     Segment,
     SendResult,
 )
+from cgbot.music.files import ScoreFetchError, fetch_score, score_extension
+from cgbot.music.skill import build_injector, render_prompt, with_music_skill
+from cgbot.music.startup import ensure_default_soundfont, prepare_soundfont_dir
 from cgbot.napcat import NapCatServer
 from cgbot.omp import OmpService, OmpStore
 from cgbot.omp.client import ClientFactory, default_client_factory
@@ -53,6 +56,7 @@ from cgbot.provider.tiers import effort_for
 from cgbot.scheduler import KIND_COMPACTION_IDLE, Scheduler, SystemEvent
 from cgbot.search import SearchService, search_tools
 from cgbot.search.gemini import GeminiSearchClient
+from cgbot.search.musescore import MuseScoreClient
 from cgbot.search.xsearch import GrokXSearchClient, XSearchService
 from cgbot.session import AsyncSessionStore
 from cgbot.timefmt import time_instruction
@@ -98,6 +102,13 @@ CODING_PROMPT = (
     "想知道进展时用 codex_btw 旁路询问(不打断、不排队),不要为此反复 codex_read 或 codex_peek。"
     "消息中标注已保存到沙盒的图片可按给出的 /workspace 路径交给 Coding Agent 使用。"
 )
+
+MUSIC_PROMPT = (
+    "用户提到音乐合成、MIDI/MusicXML 乐谱、SoundFont、Musescore 时,也交给 Coding Agent。"
+    "消息中标注[乐谱文件已保存到沙盒]的文件已有路径;若同时标注已自动提交渲染任务,"
+    "不要重复提交,等通知即可。"
+)
+MAX_SCORES_PER_MESSAGE = 3
 
 _PLACEHOLDERS = {
     "image": "[图片]",
@@ -322,6 +333,8 @@ class App:
                 queue_path=storage.for_module("coding"),
                 search_service=self._search,
                 gemini_client=self._coding_gemini,
+                soundfont_dir=config.music.soundfont_dir if config.music.enabled else None,
+                timebase=timebase,
             )
             if config.coding is not None
             else None
@@ -331,20 +344,39 @@ class App:
             if config.coding is not None
             else None
         )
+        self._image_fetch = image_fetch
+        music = config.music
+        self._score_stager = (
+            ScoreStager(config.coding.docker.host_data_dir, max_bytes=music.max_file_bytes)
+            if config.coding is not None and music.enabled
+            else None
+        )
+        # 技能注入只对私聊:注入器只被私聊路径与 codex_* 工具包装使用,群聊路径从不引用它。
+        self._music_skill = build_injector(music) if config.coding is not None else None
+        # Musescore 搜索/预览只进私聊注册表;需 [music] enabled 且 musescore_enabled。
+        self._musescore: MuseScoreClient | None = (
+            MuseScoreClient() if music.enabled and music.musescore_enabled else None
+        )
         self._memes = MemeStore(storage.for_module("meme"))
         self._vision = build_vision(config.provider.vision, storage.images, fetch=image_fetch)
         registry = builtin_tools()
         for spec in memory_tools(self._memory):
             registry.register(spec)
         for spec in search_tools(
-            self._search, gemini_client=self._gemini, x_service=self._x_search
+            self._search,
+            gemini_client=self._gemini,
+            x_service=self._x_search,
+            musescore_client=self._musescore,
         ):
             registry.register(spec)
         registry.register(meme_lookup_tool(self._memes))
         if self._voice is not None:
             registry.register(self._send_voice_tool(self._voice))
         if self._coding is not None:
-            for spec in self._coding.tools:
+            coding_tools = self._coding.tools
+            if self._music_skill is not None:
+                coding_tools = with_music_skill(coding_tools, self._music_skill)
+            for spec in coding_tools:
                 registry.register(spec)
         # omp tools are private-only: the group registry is built separately and never sees them.
         for spec in self._omp.tools():
@@ -402,6 +434,8 @@ class App:
     async def start(self) -> None:
         await self._groups.restore()
         await self._prune_images()
+        if prepare_soundfont_dir(self._config.music):
+            self._spawn(ensure_default_soundfont(self._config.music))
         if self._coding is not None:
             await self._coding.start()
         await self._omp.start()
@@ -454,10 +488,24 @@ class App:
             return
         channel = Channel("qq", message.user_id)
         identity = await self._identity.resolve(channel)
+        session_id = await self._identity.private_session_id(identity.user_id)
+        user_text = text
         notes = await self._stage_private_images(identity.user_id, message.segments)
+        score_notes, score_paths = await self._stage_private_scores(
+            identity.user_id, message.segments
+        )
+        notes.extend(score_notes)
+        render_note = await self._submit_music_render(identity.user_id, score_paths)
+        if render_note is not None:
+            notes.append(render_note)
         if notes:
             text += "\n" + "\n".join(notes)
-        session_id = await self._identity.private_session_id(identity.user_id)
+        if self._music_skill is not None:
+            notice = self._music_skill.notice_for_text(
+                session_id, user_text, force=bool(score_paths)
+            )
+            if notice is not None:
+                text += "\n\n" + notice
         item = (
             await self._vision.attach(session_id, text, segment_image_urls(message.segments))
             if self._vision is not None
@@ -640,6 +688,65 @@ class App:
                 notes.append(f"[图片已保存到沙盒: {path}]")
         return notes
 
+    async def _stage_private_scores(
+        self, user_id: str, segments: Sequence[Segment]
+    ) -> tuple[list[str], list[str]]:
+        """Private .mid/.midi/.musicxml/.xml/.mxl file segments -> sandbox inbox.
+
+        Returns (notes for the model, sandbox paths). Fail-soft: errors become a code-only note.
+        """
+        stager = self._score_stager
+        if self._coding is None or stager is None:
+            return [], []
+        notes: list[str] = []
+        paths: list[str] = []
+        attempted = 0
+        for segment in segments:
+            if segment.type != "file":
+                continue
+            extension = score_extension(segment.data)
+            if extension is None:
+                continue
+            attempted += 1
+            if attempted > MAX_SCORES_PER_MESSAGE:
+                notes.append("[乐谱文件过多,其余未保存]")
+                break
+            try:
+                data = await fetch_score(
+                    self.napcat.call,
+                    segment.data,
+                    max_bytes=self._config.music.max_file_bytes,
+                    fetch=self._image_fetch,
+                )
+                path = await stager.stage(user_id, data, extension)
+            except (ScoreFetchError, StageError) as exc:
+                code = exc.code
+            except Exception:
+                # 段数据可能带凭据 URL:不记录异常详情与段内容。
+                code = "E_INTERNAL"
+            else:
+                notes.append(f"[乐谱文件已保存到沙盒: {path}]")
+                paths.append(path)
+                continue
+            log.warning("score staging failed: code=%s", code)
+            notes.append(f"[乐谱文件未能保存: {code}]")
+        return notes, paths
+
+    async def _submit_music_render(self, user_id: str, paths: Sequence[str]) -> str | None:
+        """``auto_render_files``: one Codex render task for the staged scores, without the model."""
+        if self._coding is None or not self._config.music.auto_render_files or not paths:
+            return None
+        try:
+            result = await self._coding.service.submit(
+                user_id, render_prompt(paths), title="音乐渲染"
+            )
+        except Exception as exc:
+            log.warning("music auto render not submitted: error=%s", type(exc).__name__)
+            return "[自动渲染任务提交失败,需要时可由你用 codex_submit 交办]"
+        return (
+            f"[已自动提交音乐渲染任务 thread_id={result.thread_id};结果稍后以通知送达,无需再次提交]"
+        )
+
     async def _render_private(self, segments: Sequence[Segment]) -> str:
         record_texts: dict[int, str] = {}
         for idx, seg in enumerate(segments):
@@ -713,6 +820,8 @@ class App:
         prompt = f"{self._persona}\n\n{time_instruction(self._tz)}"
         if self._coding is not None:
             prompt += f"\n\n{CODING_PROMPT}"
+            if self._music_skill is not None:
+                prompt += f"\n\n{MUSIC_PROMPT}"
         block = self._memory_blocks.get(session_id)
         if block is None:
             user_id = session_id.removeprefix(PRIVATE_SESSION_PREFIX)

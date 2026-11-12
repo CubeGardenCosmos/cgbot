@@ -134,6 +134,14 @@ timezone = "UTC"  # IANA 时区名;群门控的本地小时(睡眠 00–08、主
 # degrade_failures = 3
 # degrade_window_seconds = 60
 # recover_after_seconds = 3600
+# [coding.time_budget]                     # 系统计时器;非重要任务 cap + grace 后强制中断
+# soft_target_seconds = 120                # 建议返回结果的时间
+# cap_seconds = 600                        # 非重要任务硬上限;重要任务未指定时长的默认上限
+# grace_seconds = 120                      # 非重要任务超过 cap 后的收尾宽限
+# notice_interval_seconds = 60             # 周期剩余/超时提醒间隔
+# approach_window_seconds = 120            # 临近 cap 的提醒窗口(距 cap 不超过该秒数)
+# approach_interval_seconds = 30           # 临近窗口内的提醒间隔
+# max_important_minutes = 60               # important=true 时 time_limit_minutes 的上限
 # [coding.bridge]
 # max_file_bytes = 536870912
 # chunk_bytes = 2097152
@@ -171,6 +179,17 @@ timezone = "UTC"  # IANA 时区名;群门控的本地小时(睡眠 00–08、主
 # model = "grok-4.7"
 # timeout_seconds = 90
 # 密钥同 [provider] api_key;Grok 失败或未实际搜索时,若 [search.gemini] 已启用则回退到限定 X 的 Gemini 搜索
+
+# 音乐合成(可选,默认关闭;依赖 [coding])。合成由沙盒内 cgmusic 完成,见 docs/reference/soundfonts.md。
+# [music]
+# enabled = false
+# soundfont_dir = "/data/cgbot-data/soundfonts"  # 宿主机路径,只读挂载为沙盒 /opt/soundfonts;相对路径按配置文件目录解析
+#                                                # 省略 = [coding.docker] host_data_dir/soundfonts(无 [coding] 时 data_dir/soundfonts)
+# auto_download_soundfont = true   # 启动时后台确保默认音色(失败只记日志)
+# auto_render_files = true         # 私聊收到 .mid/.midi/.musicxml/.xml/.mxl 后自动提交一次渲染任务
+# max_file_bytes = 8388608         # 乐谱文件大小上限(8 MiB)
+# skill_ttl_seconds = 3600         # 关键词触发的技能注入窗口:每个会话每个窗口至多注入一次;仅私聊
+# musescore_enabled = true         # 是否启用 Musescore 工具(搜索/预览,需 music.enabled)及 cgdl 说明
 
 [logging]
 level = "INFO"       # DEBUG / INFO / WARNING / ERROR / CRITICAL

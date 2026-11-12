@@ -69,6 +69,8 @@ RUN set -eux; \
     rm -rf /var/lib/apt/lists/*
 
 COPY --from=build /opt/venv /opt/venv
+# 音乐技能正文:与沙盒内 Codex 读取的是同一文件,bot 按关键词注入提示(src/cgbot/music/skill.py)。
+COPY sandbox/skills/music-synth/SKILL.md /app/skills/music-synth/SKILL.md
 
 ENV PATH=/opt/venv/bin:$PATH \
     PYTHONUNBUFFERED=1 \

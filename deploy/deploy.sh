@@ -95,7 +95,9 @@ build() {
   ssh_run "mkdir -p '$BUILD_DIR'"
   rsync -a --delete \
     --exclude='/.git' --exclude='/.venv' --exclude='/data' --exclude='/tests' --exclude='/docs' \
-    --exclude='/sandbox' --exclude='/deploy' --exclude='/config.toml' --exclude='secrets*' \
+    --include='/sandbox/' --include='/sandbox/skills/' --include='/sandbox/skills/music-synth/' \
+    --include='/sandbox/skills/music-synth/SKILL.md' --exclude='/sandbox/**' \
+    --exclude='/deploy' --exclude='/config.toml' --exclude='secrets*' \
     --exclude='*.sqlite*' --exclude='__pycache__' --exclude='.ruff_cache' --exclude='.pytest_cache' \
     "$ROOT/" "$HOST:$BUILD_DIR/" >&2
   ssh_run "cd '$BUILD_DIR' && docker build --build-arg CGBOT_REVISION='$rev' -t 'cgbot:$tag' -t cgbot:latest ." >&2

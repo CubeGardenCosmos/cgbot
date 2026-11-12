@@ -18,7 +18,7 @@ from cgbot.coding.appserver import connect_codex
 from cgbot.coding.auth import HmacSandboxAuth
 from cgbot.coding.bridge import BridgeHandle, bridge_routes
 from cgbot.coding.config import CodingConfig
-from cgbot.coding.contracts import CodingNotifier
+from cgbot.coding.contracts import CodingNotifier, CodingService
 from cgbot.coding.governor import ConcurrencyGovernor
 from cgbot.coding.imagegen import ImageGenService, imagegen_routes
 from cgbot.coding.manager import CodingManager
@@ -28,6 +28,7 @@ from cgbot.coding.searchbridge import search_routes
 from cgbot.coding.tools import codex_tools
 from cgbot.coding.web import CodingWeb
 from cgbot.config.settings import Secret
+from cgbot.dispatch.timebase import Timebase
 from cgbot.search import SearchService
 from cgbot.search.gemini import GeminiSearchClient
 
@@ -50,13 +51,22 @@ class CodingStack:
         clock: Clock = time.time,
         search_service: SearchService | None = None,
         gemini_client: GeminiSearchClient | None = None,
+        soundfont_dir: Path | None = None,
+        timebase: Timebase | None = None,
     ) -> None:
         auth = HmacSandboxAuth(config.token_secret)
         self._governor = ConcurrencyGovernor(config.concurrency, clock)
         self._store = QueueStore(queue_path)
-        self._sandbox = DockerSandboxProvider(config, auth)
+        self._sandbox = DockerSandboxProvider(config, auth, soundfont_dir=soundfont_dir)
         self._manager = CodingManager(
-            self._sandbox, connect_codex, notifier, self._governor, self._store, clock
+            self._sandbox,
+            connect_codex,
+            notifier,
+            self._governor,
+            self._store,
+            clock,
+            time_budget=config.time_budget,
+            timebase=timebase,
         )
         self._bridge: BridgeHandle = bridge_routes(config, auth, notifier, clock=clock)
         self._imagegen = ImageGenService(config)
@@ -72,6 +82,7 @@ class CodingStack:
             ],
         )
         self.tools: tuple[ToolSpec, ...] = codex_tools(self._manager)
+        self.service: CodingService = self._manager
         self._started = False
 
     async def start(self) -> None:

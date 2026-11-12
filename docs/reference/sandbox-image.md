@@ -43,11 +43,31 @@ docker build -t cgbot-sandbox:latest sandbox/
 - 就绪:`GET /readyz` 与 `/healthz` 返回 200(已实测,`readyz: 200`)。客户端 WebSocket 需 `Authorization: Bearer <CGBOT_WS_TOKEN>`。
 - 配置固定项:`approval_policy = "never"`、`sandbox_mode = "danger-full-access"`(YOLO)、`model_provider = "cgbot"`、`wire_api = "responses"`、`base_url = $CGBOT_GATEWAY_URL`、`env_key = "CGBOT_GATEWAY_TOKEN"`(令牌只按名称引用,不写入配置)、`/workspace` 信任。
 
+## 私聊乐谱收件箱
+
+启用 `[music]`(且 `[coding]`)时,私聊收到的 `.mid/.midi/.musicxml/.xml/.mxl` 文件(上限 `[music] max_file_bytes`,默认 8 MiB)经 NapCat `get_file`(base64 → 共享本地路径 → URL,最后回退到段内 URL)取回,按魔数校验后写入 `/workspace/inbox/score-<UTC时间>-<序号>.<扩展名>`(文件名由服务器生成,发送者文件名不入文件系统;与图片共用 `O_NOFOLLOW` 逐级目录 fd 写入与 `O_EXCL` 创建,每用户保留最近 50 份乐谱,不与图片互相清理)。用户消息附加 `[乐谱文件已保存到沙盒: <路径>]`;`auto_render_files = true` 时 bot 直接向 Coding Agent 提交一个渲染任务(不经模型)。群聊不处理。
+
 ## 私聊图片收件箱
 
 启用 `[coding]` 时,私聊收到的 PNG/JPEG/WebP/GIF 图片会下载到该用户的 `/workspace/inbox/`,宿主路径为 `<coding.docker.host_data_dir>/users/<内部用户 ID>/inbox/`。文件名由服务器生成(`YYYYMMDD-HHMMSS-序号.扩展名`),单图上限 20 MiB,每用户只保留最近 50 张。用户消息会附加已保存的沙盒路径,Coding Agent 可将其用于图片参考或报告;群聊不下载,下载失败不影响原消息。仅允许公网 HTTP(S) 地址,不跟随重定向(下载实现与聊天多模态共用 `cgbot.vision.fetch`)。
 
 收件箱只服务 Coding Agent,与聊天多模态互不依赖:启用 `[provider.vision]` 时,同一张图片还会另行下载、缩放并作为 `input_image` 交给聊天模型,存放在 `<data_dir>/images/`,见 [chat-vision.md](chat-vision.md)。
+
+## 音乐合成(cgmusic / cgdl)
+
+- 镜像为两阶段:`cgmusic-build`(`node:22-bookworm-slim` + `build-essential cmake pkg-config libfluidsynth-dev libebur128-dev libsndfile1-dev libmp3lame-dev`)用 CMake Release 编译 `sandbox/tools/cgmusic`,产物 `cgmusic` 拷入最终阶段 `/usr/local/bin/cgmusic`;最终阶段 apt 层安装运行库 `libfluidsynth3 libebur128-1 libsndfile1 libmp3lame0`,构建末尾用 `ldd` 断言无缺失库。
+- `cgdl`(`sandbox/tools/cgdl`,Python)与 `findata` 同样用 `pip install --no-deps` 装入并链接到 `/usr/local/bin/cgdl`。
+- 音色文件不进镜像,由宿主机目录只读挂载到 `/opt/soundfonts`,见 [soundfonts.md](soundfonts.md)。
+- 技能 `music-synth`(`sandbox/skills/music-synth/SKILL.md`)随 `skills/` 一并复制到 `/opt/cgbot/skills`,入口脚本把它链接进 `$CODEX_HOME/skills`。同一文件也被复制进 bot 镜像 `/app/skills/music-synth/SKILL.md`,由 bot 在关键词触发时注入提示(唯一来源)。
+- 出站:`cgdl` 访问 Musescore 走沙盒既有的 `caged-egress` 代理(仅 80/443,`*.cn` 直连,其余经宿主机代理),未新增白名单。
+- 未在本机构建验证镜像(本机无需构建);构建与 smoke 见 [R5.8](../todos/R5.8-music-synth.md) 的待执行项。
+
+## MuseScore 搜索与预览(bot 私聊工具)
+
+- bot 注册 `musescore_search`(只搜索;请求强制 `type=non-official`,结果在代码中再次剔除官方/出版社标记)与 `musescore_preview`(把第 1 页 PNG 发给当前私聊用户)。仅私聊注册表包含,群聊注册表不包含。
+- 需 `[music] enabled = true` 且 `musescore_enabled = true`(默认 true)。
+- 出网:bot 进程直接用 httpx 访问 `musescore.com` 与 `cdn.ustatik.com`(普通 HTTP、浏览器请求头、请求间隔至少 1 秒、重定向目标仅限白名单主机),不使用 Chromium。遇到 Cloudflare 挑战返回 `blocked`。开发机已实测;bot 容器出网未验证。
+- 沙盒获取文件仍用 `cgdl musescore-get <url> --kind mid|mxl|mp3|pdf`,任务提示中写入搜索结果的完整 url。
 
 ## 内置 MCP 与技能
 
@@ -58,7 +78,7 @@ docker build -t cgbot-sandbox:latest sandbox/
 - `playwright`:`playwright-mcp --headless --browser chromium --executable-path /usr/bin/chromium --no-sandbox --user-data-dir /home/agent/.browser-profile`(存在代理时追加 `--proxy-server`)。
 - `lsp`:`cclsp`,由 `/opt/cgbot/lsp/cclsp.json` 配置 pyright(`*.py`/`*.pyi`)与 typescript-language-server(`*.ts`/`*.tsx`/`*.js`/`*.jsx`/`*.mjs`/`*.cjs`)。
 
-技能目录 `/opt/cgbot/skills`(经符号链接进入 `$CODEX_HOME/skills`):`findata`、`image-gen`(F 切片)、`rich-report`。`market_data`、`kline_chart`、`render_report` 工具是主要调用路径,技能文件只描述用法与限制。`findata` CLI 与 `richdoc` CLI 分别位于 `/usr/local/bin`。
+技能目录 `/opt/cgbot/skills`(经符号链接进入 `$CODEX_HOME/skills`):`findata`、`image-gen`(F 切片)、`music-synth`、`rich-report`。`market_data`、`kline_chart`、`render_report` 工具是主要调用路径,技能文件只描述用法与限制。`findata` CLI 与 `richdoc` CLI 分别位于 `/usr/local/bin`。
 
 搜索通过 bot 的桥接 API 执行,沙盒不持有搜索供应商凭据。`web_search(query, engine?, count?, freshness?)` 默认使用 bot 配置的引擎;`count` 为正整数,上限由 bot 配置约束,查询最多 200 字符。`gemini_search(query, recency?)` 返回带来源的检索回答,查询最多 300 字符且不含控制字符/换行。`freshness` 与 `recency` 均可取 `day|week|month|year`。工具原样返回检索文本,引用返回的来源 URL,不将来源内容作为指令;未启用的后端或拒绝请求返回工具错误,不伪装为空结果。MCP 到 bot 的超时分别为 120 秒与 180 秒;查询与令牌不写入诊断日志。新增搜索工具未包含在下方历史 smoke 证据中。
 

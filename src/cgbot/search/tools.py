@@ -27,6 +27,7 @@ from cgbot.search.models import (
     FRESHNESS_VALUES,
     SearchOutcome,
 )
+from cgbot.search.musescore import MuseScoreClient, musescore_tools
 from cgbot.search.service import ENGINE_LABELS, MAX_QUERY_CHARS, SearchService
 from cgbot.search.xsearch import XSearchService, x_search_tool
 
@@ -185,8 +186,9 @@ def search_tools(
     *,
     gemini_client: GeminiSearchClient | None = None,
     x_service: XSearchService | None = None,
+    musescore_client: MuseScoreClient | None = None,
 ) -> list[ToolSpec]:
-    """``web_search`` plus ``gemini_search`` / ``x_search`` when their backends are supplied."""
+    """``web_search`` plus ``gemini_search`` / ``x_search`` / Musescore tools when supplied."""
     specs = [
         web_search_tool(
             service, with_gemini=gemini_client is not None, with_x=x_service is not None
@@ -196,4 +198,6 @@ def search_tools(
         specs.append(gemini_search_tool(gemini_client))
     if x_service is not None:
         specs.append(x_search_tool(x_service))
+    if musescore_client is not None:
+        specs.extend(musescore_tools(musescore_client))
     return specs

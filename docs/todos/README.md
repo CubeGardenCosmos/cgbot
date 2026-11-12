@@ -62,6 +62,7 @@
 | R5.5 | [回报桥接与大文件](R5.5-bridge-large-binary.md) | 规划中 |
 | R5.6 | [Playwright 持久化与子代理](R5.6-playwright-subagents.md) | 规划中 |
 | R5.7 | [omp_* 工具](R5.7-omp-tools.md) | 规划中 |
+| R5.8 | [音乐合成(沙盒 cgmusic + bot 接线)](R5.8-music-synth.md) | 进行中 |
 
 ## M6 后置与上线
 

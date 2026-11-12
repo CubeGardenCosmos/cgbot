@@ -81,6 +81,17 @@ model = "grok-4.7"
 [logging]
 level = "INFO"
 
+# 音乐合成(2026-11-12):沙盒内 cgmusic 合成;音色目录默认 <host_data_dir>/soundfonts(宿主机路径,
+# 只读挂载为沙盒 /opt/soundfonts;bot 容器内同路径,启动时后台确保默认音色)。须先构建含 cgmusic 的沙盒镜像。
+[music]
+enabled = true
+# soundfont_dir = "/data/cgbot-data/soundfonts"   # 可选;默认即 host_data_dir/soundfonts
+auto_download_soundfont = true
+auto_render_files = true
+max_file_bytes = 8388608
+skill_ttl_seconds = 3600
+musescore_enabled = true
+
 [coding]
 enabled = true
 token_secret = "secret:coding_token"      # HMAC 密钥;每个沙盒令牌由它派生

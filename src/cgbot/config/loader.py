@@ -20,6 +20,7 @@ from cgbot.config.settings import (
     FallbackModelConfig,
     GroupConfig,
     LoggingConfig,
+    MusicConfig,
     NapCatConfig,
     ProviderConfig,
     ReasoningTiers,
@@ -87,7 +88,18 @@ def load_config(
     search = _search(root.sub("search"), source)
     voice_raw = root.raw_table("voice")
     coding_raw = root.raw_table("coding")
+    music_table = root.sub("music")
     root.close()
+
+    coding = (
+        _coding(coding_raw, source, config_path.parent, provider.context_window)
+        if coding_raw is not None
+        else None
+    )
+    default_soundfonts = (
+        coding.docker.host_data_dir if coding is not None else storage.data_dir
+    ) / "soundfonts"
+    music = _music(music_table, config_path.parent, default_soundfonts)
 
     return Config(
         napcat=napcat,
@@ -99,11 +111,32 @@ def load_config(
         logging=logging_cfg,
         search=search,
         voice=load_voice_config(voice_raw) if voice_raw is not None else None,
-        coding=(
-            _coding(coding_raw, source, config_path.parent, provider.context_window)
-            if coding_raw is not None
-            else None
-        ),
+        coding=coding,
+        music=music,
+    )
+
+
+def _music(t: _Table, base_dir: Path, default_soundfonts: Path) -> MusicConfig:
+    """``[music]``: 默认关闭;``soundfont_dir`` 相对路径按配置文件目录解析。"""
+    defaults = MusicConfig()
+    enabled = t.bool_or("enabled", defaults.enabled)
+    soundfont_dir = (
+        t.path_under("soundfont_dir", base_dir) if t.has("soundfont_dir") else default_soundfonts
+    )
+    auto_download = t.bool_or("auto_download_soundfont", defaults.auto_download_soundfont)
+    auto_render = t.bool_or("auto_render_files", defaults.auto_render_files)
+    max_file_bytes = t.positive_int_or("max_file_bytes", defaults.max_file_bytes)
+    ttl = t.positive_number_or("skill_ttl_seconds", defaults.skill_ttl_seconds)
+    musescore = t.bool_or("musescore_enabled", defaults.musescore_enabled)
+    t.close()
+    return MusicConfig(
+        enabled=enabled,
+        soundfont_dir=soundfont_dir,
+        auto_download_soundfont=auto_download,
+        auto_render_files=auto_render,
+        max_file_bytes=max_file_bytes,
+        skill_ttl_seconds=ttl,
+        musescore_enabled=musescore,
     )
 
 
@@ -401,6 +434,20 @@ def _coding(
     )
     conc_t.close()
 
+    budget_t = t.sub("time_budget")
+    time_budget = coding_cfg.TimeBudgetConfig(
+        soft_target_seconds=budget_t.positive_number_or("soft_target_seconds", 120.0),
+        cap_seconds=budget_t.positive_number_or("cap_seconds", 600.0),
+        grace_seconds=budget_t.positive_number_or("grace_seconds", 120.0),
+        notice_interval_seconds=budget_t.positive_number_or("notice_interval_seconds", 60.0),
+        approach_window_seconds=budget_t.positive_number_or("approach_window_seconds", 120.0),
+        approach_interval_seconds=budget_t.positive_number_or("approach_interval_seconds", 30.0),
+        max_important_minutes=budget_t.positive_int_or("max_important_minutes", 60),
+    )
+    if time_budget.cap_seconds < time_budget.soft_target_seconds:
+        raise budget_t.error("cap_seconds", "不得小于 soft_target_seconds")
+    budget_t.close()
+
     bridge_t = t.sub("bridge", required=True)
     bridge = coding_cfg.BridgeConfig(
         max_file_bytes=bridge_t.positive_int("max_file_bytes"),
@@ -421,6 +468,7 @@ def _coding(
         docker=docker,
         codex=codex,
         concurrency=concurrency,
+        time_budget=time_budget,
         bridge=bridge,
         imagegen=imagegen,
     )
