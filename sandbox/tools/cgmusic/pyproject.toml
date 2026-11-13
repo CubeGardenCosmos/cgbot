@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cgmusic"
+version = "0.2.0"
+description = "干声合成编排:cgscore 前处理 -> 并发 cgsynth 分轨渲染 -> cgmaster 母带"
+requires-python = ">=3.10"
+# 沙箱镜像默认 Python 的依赖由 sandbox/requirements.txt 预装,安装时使用 --no-deps。
+dependencies = [
+    "cgscore",
+    "cgmaster",
+    "soundfile",
+    "mido>=1.3.3",
+]
+
+[dependency-groups]
+dev = ["pytest>=8", "ruff>=0.6"]
+
+[project.scripts]
+cgmusic = "cgmusic.cli:main"
+
+[tool.uv.sources]
+cgscore = { path = "../cgscore", editable = true }
+cgmaster = { path = "../cgmaster", editable = true }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "ASYNC"]
