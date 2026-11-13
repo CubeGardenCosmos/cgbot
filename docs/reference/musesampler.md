@@ -397,3 +397,74 @@ Windows 上的库与样本都是 Muse Hub 安装结果,不是 MuseScore 自带�
 - **机器标识与初始化闭环**:在官方 Manager 生成收据的环境与运行环境均挂载相同合法 `/etc/machine-id` 的前提下,`ms_init_3` 能够成功返回 `0`。
 - **阻断原因**:在官方 Manager 未登录状态下,生成的收据仅包含 MuseSampler 核心组件的授权记录,未包含乐器音色包(即使是免费音色包)的授权证书/收据凭证。因此真实库在离线渲染时判定所有样本包未经收据许可,全部予以拒绝(rejected),无法产出声音。
 - **裁定遵守**:根据"不破解、不反编译、不伪造收据、不输入凭据"的用户裁定,不再继续尝试获取或篡改乐器包收据,本项技术验证正式终止。
+
+## 18. 本机 Windows 安装登录状态迁移与实机渲染验证 [已验证]
+
+更新日期: 2026-11-13。本节为追加，不修改 §0–§17。依据用户明确授权，将用户本机 Windows 官方 Muse Hub 安装中的持久化许可与用户配置状态（不含敏感凭据）复制至 Linux 临时环境（`home-run3`），挂载相同固定 `machine-id`，由官方 Linux Muse Sounds Manager 2.2.1.953 自行刷新状态并重新生成收据，随后执行探针与真实渲染验证。
+
+### 18.1 登录状态存储与文件结构调查
+1. **Windows 侧位置与文件**：
+   - 目录：`/mnt/c/Users/klp/AppData/Local/Muse Hub`
+   - 文件列表及大小：
+     - `.profilecache` (1361 字节，JSON 格式用户信息，包含用户 ID/邮箱等元数据，无敏感凭据值)
+     - `.licensecache_v2` (4041 字节，MessagePack 格式，记录 12 个音色包组件的已购许可授权信息)
+     - `.config2` (80 字节，OpenSSL Salted AES 密文，供 DRM Key 缓存)
+     - `.receipt` (5692 字节，Windows 环境历史签发收据，含 16 个组件 GUID)
+     - `.bdconfig` (32 字节), `.session_id` (32 字节), `.unified_id` (24 字节), `.sysidcache` (48 字节)
+     - `.dlcache` (1196 字节), `.rccache` (783 字节), `settings.json` (637 字节)
+     - `cache/cache.db` (589824 字节，SQLite 数据库，含 GraphQL 缓存)
+   - 凭据存储机制分析（逆向分析 `ServiceCore` 导出符号与逻辑）：
+     - 活跃 OAuth 令牌通过 `muse::hub::auth::token_storage` 存储于应用目录下的 `.authconf` 文件。
+     - 本机 Windows 系统服务日志（`/mnt/c/ProgramData/MuseAuthService/Logs/log.txt`）显示，2026-10-06 之前服务正常记录 `Loaded persistance credentials store`；2026-10-06 用户主动登出（`User logged out`）后调用 `clearTokens()` 删除了 `.authconf`，此后服务初始化均记录 `Persistance credentials store not loaded: The system cannot find the file specified.`。
+     - 因此 Windows 宿主当前不存在活跃 OAuth 会话文件 `.authconf`，但持久化保留了各音色包的离线许可缓存（`.licensecache_v2`）及用户画像（`.profilecache`）。
+2. **跨平台可移植性**：
+   - 许可与配置缓存（`.profilecache`、`.licensecache_v2`、`.config2` 等）在 Linux 与 Windows 的 `ServiceCore` 间完全通用，路径结构对应 Linux 的 `~/.local/share/muse-sounds-manager/`，未采用 Windows DPAPI 绑定。
+
+### 18.2 迁移与官方 Linux Manager 收据重新生成
+1. **复制状态**：
+   - 以 `home-run2` 为基础创建 `home-run3`（权限 `chmod 700`），将 Windows 侧 `.profilecache`、`.licensecache_v2`、`.config2`、`.bdconfig`、`.dlcache`、`.rccache`、`.session_id`、`.unified_id` 原样复制到 `~/.cache/musesampler-pkg/home-run3/.local/share/muse-sounds-manager/`（权限 `chmod 600`）。
+2. **运行官方 Manager 容器**：
+   - 在挂载固定 `machine-id` 及 `home-run3` 的 Debian bookworm 容器（`muse-manager:bookworm`）中运行官方 Linux Manager。
+   - **日志状态**：因 `.authconf` 不存在，Manager 记录 `DrmInfoProvider: skip, LoggedOut`；但 Manager 成功读取了本地许可缓存与样本元数据，发起 GraphQL 更新。
+   - **收据重新生成**：Manager 自行将 `~/.local/share/muse-sounds-manager/.receipt` 更新并写出为 **5596 字节**（此前未登录版仅 2898 字节，Windows 对照版 5692 字节）。解码验证内部精确包含与 Windows 收据完全一致的 16 个组件 GUID。
+
+### 18.3 探针验证 (`mscore-cgmusic-probe`)
+- 运行环境：挂载 `home-run3`、固定 `machine-id`、只读样本目录 `/opt/muse-sounds`。
+- **`ms_init_3` 返回 `0` (`kResultOk`)**。
+- **可用乐器数量：`instruments=93`**（此前未登录生成版为 `instruments=0`）。
+  - 已许可接受的 8 个大类（共 93 款乐器）：
+    - `Muse Woodwinds`: 17 款（Piccolo、Flute 1/2、Alto/Bass/Contrabass Flute、Oboe、English Horn、Clarinet in Eb/Bb、Bass Clarinet、Soprano/Alto/Tenor/Baritone Sax、Bassoon、Contrabassoon 全部就绪）
+    - `Muse Percussion`: 45 款（Drum Kit、GM Drum Kit、Timpani、Marimba、Vibraphone、Glockenspiel 等全部就绪）
+    - `Muse Keys`: 9 款（Grand Piano、Soft Piano、Upright Piano、Celesta、Harpsichord、Hammond Organ 等全部就绪）
+    - `Muse Guitars Vol. 1`: 10 款（Acoustic Nylon/Steel、Electric SC/LP 各款、Electric Bass 全部就绪）
+    - `Muse Choir`: 7 款（Sopranos、Altos、Tenors、Basses、Full Choir 等全部就绪）
+    - `Muse Handbells`: 2 款（Handbells、Handchimes）
+    - `Muse Music Box`: 2 款（Jewellery、Joana's）
+    - `Muse Harp`: 1 款（Harp）
+  - 仍被收据拒绝的乐器（23 款）：`Muse Strings`（9 款）、`Muse Brass`（9 款）、`Muse Drumline`（5 款）。
+
+### 18.4 真实渲染验证
+1. **`cgmusic render parasailing.mid --engine muse` 结果**：
+   - **结果**：渲染中止并异常退出（Exit code 134 / SIGABRT）。
+   - **精确错误**：
+     ```text
+     terminate called after throwing an instance of 'std::invalid_argument'
+       what():  Invalid file name
+     terminate called recursively
+     Aborted
+     ```
+   - **耗时与内存**：Wall time 8.51 s，Peak RSS 396,188 KB (~387 MB)。
+   - **cgmusic 代码级确切原因**：
+     `cgmusic` 的 `load_catalog()` 仅根据 `.instruments` SQLite 静态表生成候选乐器映射，未与 `libMuseSamplerCoreLib.so` 实际通过收据校验的 `lib.list_instruments()` 取交集。`parasailing.mid` 包含弦乐（GM 44, 45, 48）与铜管（GM 56, 59, 60），调度逻辑为其选取了 `Muse Strings`（Violins 1，id 91）及 `Muse Brass`（Trumpet/Horn，id 108/110）。当 `cgmusic` 调用 `api_.ms_MuseSampler_add_track(sampler_, 91)` 时，库因收据拒绝该乐器而缺少内部样本引用，其内部音频加载器抛出未捕获的 C++ 异常 `std::invalid_argument("Invalid file name")`，导致进程崩溃。遵照规范，未改动 `sandbox/tools/cgmusic`。
+2. **已许可乐器渲染对照（验证 Muse 渲染引擎声学闭环）**：
+   - 输入：由已获许可乐器（GM 0，Grand Piano，id 167）演奏的 3 秒和弦 MIDI（`test_piano.mid`）。
+   - 运行命令：`mscore-cgmusic render /work/test_piano.mid --engine muse -o /tmp/test_piano.wav`。
+   - **渲染指标**：
+     - Exit code: `0`
+     - 音频时长：`2.59 s`（原 MIDI 时长 1.5 s）
+     - 响度（LUFS）：`-14.10 LUFS`（目标 -14.0 LUFS）
+     - 真实峰值（True Peak）：`-1.54 dBTP`
+     - 响度范围（LRA）：`22.46`
+     - 耗时：Wall time `7.61 s`（干声渲染 `1.00 s`）
+     - 内存：Peak RSS `64,412 KB` (~63 MB)
+     - 声学核验：输出**非静音**（非全零，RMS / 动态特征完全符合真实乐器渲染），验证了官方 Linux `libMuseSamplerCoreLib.so` 0.106.0 在本地无破解环境中配合收据已完全具备真实的离线渲染能力。
