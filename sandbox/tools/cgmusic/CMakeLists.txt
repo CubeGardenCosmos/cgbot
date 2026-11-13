@@ -30,6 +30,7 @@ add_library(cgmusic_core STATIC
   src/musicxml.cpp
   src/mix/reverb.cpp
   src/mix/mixer.cpp
+  src/mix/dynamics.cpp
   src/muse/loader.cpp
   src/muse/catalog.cpp
   src/muse/mapping.cpp

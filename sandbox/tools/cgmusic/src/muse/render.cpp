@@ -388,6 +388,7 @@ Audio mix_hybrid(const DryRender& dry, const std::vector<ChannelPlan>& muse_plan
   mix.reverb_level = options.reverb.level.value_or(1.0);
   mix.target_lufs = target_lufs;
   mix.auto_balance = options.balance;
+  mix.master_dynamics = true;
   const MixResult mixed = mix_stems(stems, mix);
 
   if (report) {

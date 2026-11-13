@@ -9,6 +9,7 @@
 
 #include "common.hpp"
 #include "loudness.hpp"
+#include "mix/dynamics.hpp"
 #include "mix/reverb.hpp"
 
 namespace cgmusic {
@@ -168,7 +169,22 @@ MixResult mix_stems(const std::vector<MixInput>& inputs, const MixOptions& optio
   // 响度与真峰值:target 为 nullopt 时保持混音电平,仅施加真峰值上限。
   const double target = options.target_lufs ? *options.target_lufs : measure(audio).lufs;
   const double ceiling = options.target_lufs ? kCeilingDbtp : kLimiterCeilingDbtp;
-  const Quality quality = master(audio, target, ceiling);
+  std::optional<DynamicsReport> dynamics;
+  Quality quality;
+  if (options.master_dynamics) {
+    dynamics = compress_master(audio, target, ceiling, DynamicsSettings{}, &quality);
+  } else {
+    quality = master(audio, target, ceiling);
+  }
+
+  std::string dynamics_json;
+  if (dynamics) {
+    dynamics_json = ",\"dynamics\":{\"threshold_db\":" + number(dynamics->threshold_db) +
+                    ",\"ratio\":" + number(dynamics->ratio) +
+                    ",\"max_gain_reduction_db\":" + number(dynamics->max_gain_reduction_db) +
+                    ",\"avg_gain_reduction_db\":" + number(dynamics->average_gain_reduction_db) +
+                    ",\"makeup_db\":" + number(dynamics->makeup_db) + "}";
+  }
 
   MixResult result;
   result.left = std::move(audio.channels[0]);
@@ -181,7 +197,7 @@ MixResult mix_stems(const std::vector<MixInput>& inputs, const MixOptions& optio
       ",\"loudness\":{\"target_lufs\":" + number(target) + ",\"lufs\":" + number(quality.lufs) +
       ",\"true_peak_dbtp\":" + number(quality.true_peak_dbtp) +
       ",\"lra\":" + number(quality.lra) + ",\"clipped\":" +
-      std::string(quality.clipped ? "true" : "false") + "}}";
+      std::string(quality.clipped ? "true" : "false") + dynamics_json + "}}";
   return result;
 }
 

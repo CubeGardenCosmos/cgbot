@@ -24,6 +24,7 @@ struct MixOptions {
   double reverb_level = 1.0;   // 0-1.5,湿声总电平(与 VideoMaker 的湿度上限 1.5 一致)。
   std::optional<double> target_lufs = -14.0;  // nullopt:保持混音电平,仅施加 alimiter 式上限(-0.4455 dBTP)。
   bool auto_balance = true;    // 自动声部平衡(balance.hpp);关闭仅用于开发。
+  bool master_dynamics = false;  // 仅 Muse 路径开启;false 保持原母带逐采样不变。
 };
 
 struct MixResult {
