@@ -479,3 +479,76 @@ Windows 上的库与样本都是 Muse Hub 安装结果,不是 MuseScore 自带�
 - **鼓组实测发现**:本机 0.106.0 下,`GM Kit`(id 188)在 `trigger_render` 时由库内部抛出 `std::invalid_argument("Invalid file name")` 并 `terminate`,这是库内的原生异常,try/catch 拦不住。原因未深究。`Drum Kit`(id 178)正常渲染,因此鼓组候选顺序改为 `Drum Kit` 优先、`GM Kit` 回退。
 - **真实渲染 `parasailing.mid`**(`--engine muse`,§18 的容器配方):退出码 0;时长 91.67 s(MIDI 90.0 s);-14.08 LUFS;真峰值 -1.55 dBTP;LRA 1.55;未削波;墙钟 32.3 s。弦乐、铜管通道按上述规则回退到 FluidSynth(`musescore_general_full`)。
 - **未验证**:未逐通道核对 RMS;未做听感验收;`GM Kit` 抛异常的原因未查。
+
+## 20. 重新登录后状态刷新与 Manager 验证 [已验证 / 终止]
+
+更新日期:2026-11-13。本节为追加,不修改 §0–§19。仅在用户授权的 Windows Muse Hub 状态与官方 Linux Manager 正常流程内验证,不制作、修改收据,不使用钩子或绕过。
+
+### 20.1 Windows 刷新结果
+
+- Muse Hub 日志在 18:35:35 记录 `Starting Login`,18:35:51 记录 `Saving login data`,随后完成 `MuseSampler`、`Muse Strings`、`Muse Percussion`、`Muse Drumline` 与一次 `Muse Brass` 安装。后续 Brass 又执行删除并重新下载;按任务更新,不追查 Brass 下载问题。
+- 包目录顶层 mtime 只有 `Muse Brass` 更新为 18:49:18,其他包顶层目录仍为 8 月时间;Strings、Drumline、Percussion 的 `.spx` 文件分别于约 18:36、18:38–18:39、18:36–18:37 刷新。因此以文件 mtime 与安装日志确认变化,不以顶层目录 mtime 单独判断。
+- 刷新状态文件(字节;+08:00 mtime):`.licensecache_v2` 4041(18:37:47)、`.profilecache` 1361(18:36:02)、`.config2` 80(18:45:08)、`.session_id` 32(18:35:30)、`.bdconfig` 32(18:49:30)、`.dlcache` 1169(18:49:20)、`.rccache` 823(18:49:21);`.unified_id` 24 与 `.sysidcache` 48 保持 2026-08-23 原时间。Windows `.receipt` 为 5890 字节(18:49:21)。
+- **检查当时 `.authconf` 不存在**。Windows MuseAuthService 日志最后更新于 2026-11-12,未包含本次登录;其尾部仍只记录凭据存储文件不存在,故不能用该旧日志判断本次登录失败。以上登录成功证据来自当前 Muse Hub 日志状态词。
+
+### 20.2 官方 Linux Manager 与停止条件
+
+- 从 `home-run3` 建立 `home-run5`,原样刷新 §20.1 所列状态文件,预先删除旧 `.receipt`;目录权限 0700、状态文件 0600。
+- 按 §18 / `run4-work/run_manager.sh` 的相同 GUI、网络与固定 `machine-id` 挂载流程运行官方 Manager,容器正常退出;容器墙钟 176.19 s。
+- **Manager 当前日志明确记录 `DrmInfoProvider ... skip, LoggedOut`**,没有 `LoggedIn`。它仍自行写出新 `.receipt`:**5791 字节**,PKCS#7 内含 **17 个不同 GUID**(run3 旧收据 5596 字节、16 个;Windows 对照收据 5890 字节、17 个)。只记录计数,不记录凭据或凭据内容。
+- 因触发“Manager 显示 LoggedOut”停止条件,**未运行探针、未执行 `parasailing.mid` 渲染、未产生 `out5.mp3`**。故本 run5 的逐包接受/拒绝、JSON fallbacks、LUFS、真峰值、时长与渲染墙钟均不适用;§19 的 run3 数据不是本次结果。
+- 本次容器使用 `--rm`,已自动清理;临时工作目录与 Manager 产生的敏感日志删除,`home-run5` 递归去除 group/other 权限。
+
+## 21. Muse 母带动态处理(总线压缩 + 前瞻限制) [已验证 / 未听感验收]
+
+更新日期:2026-11-13。本节为追加,不修改 §0–§20。代码:`sandbox/tools/cgmusic/src/mix/dynamics.{hpp,cpp}`;开关 `MixOptions::master_dynamics`(默认 false),仅 `muse::mix_hybrid` 置 true;fluidsynth 路径与 `main.cpp` 的 `master()` 调用不变。
+
+### 21.1 信号链与参数
+
+Muse 混音(干声 + 混响总线)→ **总线压缩** → 自动补偿增益 → **5 ms 前瞻峰值限制** → 原有迭代真峰值母带 `master()`。
+
+| 项 | 取值 | 理由(设计选择,未经听感验证) |
+| --- | --- | --- |
+| 阈值 | 输入积分响度 +3 dB(LUFS 参照,按曲目自适应) | 采样乐器素材响度低、动态大,固定 dBFS 阈值对不同曲目不通用;峰值侧链高于积分响度 +3 dB 才开始压 |
+| 比率 | 2.5:1 | 管弦素材取 2–3:1 的保守区间,只收峰不压扁 |
+| 软拐点 | 6 dB(二次) | 避免在阈值处出现明显的开始点 |
+| 攻击 | 30 ms | 让弦乐/拨奏的起音瞬态先通过 |
+| 释放 | 两级:120 ms 与 900 ms 两路并行恢复,增益衰减取均值 | 瞬态后先较快回升一半,其余慢速恢复,降低抽吸感 |
+| 侧链 | 100 Hz 二阶高通,左右取较大者(声道联动) | 低频不触发压缩,避免低音抽吸;联动避免立体声像漂移 |
+| 自动补偿 | 压缩后实测积分响度 → 目标响度,线性增益 | 补偿量随素材而变,写入报告 `makeup_db` |
+| 前瞻限制 | 5 ms 半窗(最小值+均值平滑),上限 = 真峰值上限 -0.5 dB | 先削掉明显瞬态,让后面的迭代真峰值级只做过采样的小修正 |
+
+报告:`muse.mix.loudness.dynamics` = `{threshold_db, ratio, max_gain_reduction_db, avg_gain_reduction_db(按全部帧平均), makeup_db}`。默认路径报告不含该块。
+
+### 21.2 单元测试(离线,确定性;`ctest` 全绿)
+
+`tests/test_dynamics.cpp`(6 项):默认混音路径与加入本级之前的基线逐位一致(FNV-1a 哈希 `73bc1f18df5d23c3`,由改动前的 mixer/loudness 构建的程序算出,覆盖左右声道 float 位模式与报告文本;并断言 `master_dynamics=false` 与缺省完全相同、报告无 `dynamics`);安静且动态大的合成信号达到 -14 LUFS ±0.2、TP ≤ -1.5;压缩后 3 s 短时响度第 95–10 百分位差小于未压缩;无样本超过上限且 TP ≤ -1.5;全静音/空输入抛出 `synth_failed`、极短输入输出有限(无 NaN);Muse 混音报告含 `dynamics` 块。合成信号实测(临时探针):LRA 15.95 → 14.45,最大衰减 2.12 dB。
+
+### 21.3 真实 A/B:`parasailing.mid --engine muse`
+
+§18/§19 配方(`home-run3` 只读使用、未修改),二进制改名 `mscore-cgmusic`(前/后各一个);MIDI `/mnt/d/Users/klp/Desktop/cgmusic-eval/parasailing.mid`;WAV 输出,同一台机器同一库。回退通道:仅通道 10(鼓,program 48)回退 FluidSynth,弦乐通道本次由 Muse 渲染(与 §19 的回退集合不同)。时长 92.06 s。短时响度 = libebur128 3 s 窗口每秒取一次(90 个值,丢弃 < -70 LUFS)。
+
+| 指标 | 之前(无压缩) | 之后(压缩) |
+| --- | --- | --- |
+| 积分响度 LUFS | -14.09 | -14.00 |
+| 真峰值 dBTP | -1.55 | -1.89 |
+| LRA(WAV 分析) | 8.33 | 6.75 |
+| 最大增益衰减 | 无 | 3.19 dB |
+| 平均增益衰减 | 无 | 0.81 dB |
+| 补偿增益 | 无 | +5.79 dB |
+| 压缩阈值 | 无 | -15.38 dB(= 压缩前混音积分响度 -18.38 LUFS + 3 dB;由报告阈值反推,未单独测量) |
+| 短时响度 P10 / P50 / P95 | -19.25 / -13.84 / -11.06 | -17.87 / -13.74 / -11.19 |
+| 百分位差 P95−P10 | 8.19 LU | 6.68 LU |
+| 百分位差 P90−P10 | 7.28 LU | 5.69 LU |
+
+说明:压缩让最安静的段落抬高约 1.4 LU,最响段落基本不变;LRA 与百分位差缩小约 1.4–1.6 LU。响度已能在原母带中达到目标,本级的收益是动态范围收窄(相同 -14 LUFS 下安静段更响),而不是更高的积分响度(目标仍固定为 -14 LUFS)。TP 余量变大是因为前瞻限制多留 0.5 dB,最终响度仍落在目标 ±0.1 LU。
+
+首次试验(阈值 = 响度 +6 dB)仅压 1.74 dB/平均 0.35 dB,LRA 7.57;改为 +3 dB 后取得上表结果。该调参只依据这一首曲子的数值,未经其他曲目验证。
+
+### 21.4 未验证
+
+- **没有做任何听感检查**:是否有抽吸、失真、瞬态变钝,均未听过;上表只是响度/增益衰减的测量。
+- 参数只在 `parasailing.mid`(一首曲子)与合成信号上验证;其他曲目(密集打击乐、极安静/极响的曲目)未试。
+- 未与 FluidSynth 路径做同曲 A/B(该路径按设计保持不变)。
+- 未测处理耗时(压缩与限制均为线性复杂度,相对 Muse 渲染可忽略,但未实测)。
+- 前瞻限制 + 迭代真峰值级是否仍会在极端素材上抬高失真,未测。
