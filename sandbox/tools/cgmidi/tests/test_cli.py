@@ -40,9 +40,18 @@ def test_process_applies_options_and_writes_file(tmp_path, capsys):
     out_path = tmp_path / "out.mid"
     code, out, _ = _run(
         [
-            "process", str(src), "-o", str(out_path),
-            "--transpose", "2", "--speed", "2",
-            "--set-bank", "1=3:4", "--map-channel", "1:2",
+            "process",
+            str(src),
+            "-o",
+            str(out_path),
+            "--transpose",
+            "2",
+            "--speed",
+            "2",
+            "--set-bank",
+            "1=3:4",
+            "--map-channel",
+            "1:2",
         ],
         capsys,
     )
@@ -54,8 +63,11 @@ def test_process_applies_options_and_writes_file(tmp_path, capsys):
     events = absolute(MidiFile(str(out_path)).tracks[0])
     assert notes_of(events) == [(0, "note_on", 1, 62), (480, "note_off", 1, 62)]
     assert [m.tempo for _, m in events if m.type == "set_tempo"] == [250_000]
-    assert [(m.control, m.value, m.channel) for _, m in events
-            if m.type == "control_change" and m.control in (0, 32)] == [
+    assert [
+        (m.control, m.value, m.channel)
+        for _, m in events
+        if m.type == "control_change" and m.control in (0, 32)
+    ] == [
         (0, 3, 1),
         (32, 4, 1),
     ]
@@ -76,8 +88,7 @@ def test_garbage_bytes_are_parse_failed(tmp_path, capsys):
 
 
 def test_format_two_is_unsupported_and_writes_nothing(tmp_path, capsys):
-    src = write_midi(tmp_path / "fmt2.mid", [[note_on(0, 0, 60), note_off(480, 0, 60)]],
-                     mtype=2)
+    src = write_midi(tmp_path / "fmt2.mid", [[note_on(0, 0, 60), note_off(480, 0, 60)]], mtype=2)
     out_path = tmp_path / "out.mid"
     code, _, err = _run(["process", str(src), "-o", str(out_path)], capsys)
     assert code == 1
@@ -123,3 +134,47 @@ def test_missing_output_flag_exits_two_with_json(tmp_path, capsys):
         main(["process", str(src)])
     assert exc.value.code == 2
     assert json.loads(capsys.readouterr().err)["error"] == "bad_input"
+
+
+def test_bars_cli_outputs_json(tmp_path, capsys):
+    src = _source(tmp_path)
+    code, out, _ = _run(["bars", str(src)], capsys)
+    assert code == 0
+    data = json.loads(out)
+    assert data["total_bars"] == 1
+    assert data["bars"][0]["time_signature"] == "4/4"
+
+
+def test_hands_cli_merges_and_writes(tmp_path, capsys):
+    src = write_midi(
+        tmp_path / "hands.mid",
+        [
+            [note_on(0, 0, 72, 40), note_off(480, 0, 72)],
+            [note_on(0, 0, 48, 60), note_off(480, 0, 48)],
+        ],
+    )
+    out_path = tmp_path / "hands_out.mid"
+    code, out, _ = _run(["hands", str(src), "-o", str(out_path)], capsys)
+    assert code == 0
+    report = json.loads(out)
+    assert report["notes_changed"] == 1
+    assert out_path.exists()
+
+
+def test_pedal_cli_honors_existing_and_replaces(tmp_path, capsys):
+    src = write_midi(
+        tmp_path / "pedal.mid",
+        [[note_on(0, 0, 60), note_off(480, 0, 60)]],
+    )
+    out_path = tmp_path / "pedal_out.mid"
+    code, out, _ = _run(["pedal", str(src), "-o", str(out_path), "--mode", "bar"], capsys)
+    assert code == 0
+    first = json.loads(out)
+    assert first["status"] == "ok"
+    assert out_path.exists()
+
+    code, out, _ = _run(["pedal", str(out_path), "-o", str(tmp_path / "noop.mid")], capsys)
+    assert code == 0
+    second = json.loads(out)
+    assert second["status"] == "already_pedaled"
+    assert not (tmp_path / "noop.mid").exists()

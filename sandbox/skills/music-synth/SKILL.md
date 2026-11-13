@@ -23,6 +23,9 @@ cgmidi info <input.mid>
 cgmidi process <input.mid> -o <output.mid> [--speed F | --bpm B] [--transpose N]
     [--mute CH]... [--solo CH]... [--map-channel SRC:DST]... [--set-program CH=PROG]...
     [--set-bank CH=MSB[:LSB]]... [--map-program SRC=DST]... [--start S] [--end E]
+cgmidi hands <input.mid> -o <output.mid> [--channel CH]... [--window-beats F] [--accent-gap N]
+cgmidi bars <input.mid> [--channel CH]...
+cgmidi pedal <input.mid> -o <output.mid> [--mode auto|bar|chord] [--channel CH]... [--replace] [--gap-ticks N]
 ```
 
 - `info`:输出速度(tempo)、时长、音符数、通道(1–16)、音色、音库、音域与轨道。修改前先用它看清通道与音色。
@@ -38,9 +41,10 @@ cgmidi process <input.mid> -o <output.mid> [--speed F | --bpm B] [--transpose N]
   - `--map-program SRC=DST`:对所有通道做音色号映射 0–127,可重复。
   - `--start S` / `--end E`:按原乐谱时间(秒)裁剪。`--mute`、`--solo`、`--set-program`、`--set-bank` 使用原始通道号;`--map-channel` 在最后应用。
 - 输入只读;输出路径不能与输入相同,且输出目录必须已存在。
-- **没有力度(velocity)调整选项。** 不要承诺能改力度。
-- 成功输出 JSON:`output`、`duration_seconds`、`notes`。失败码:`bad_input`、`parse_failed`、`unsupported_format`(输入格式不受支持)、`out_of_range`(如移调后音高越界)、`write_failed`。参数错误时 argparse 退出码为 2,同样输出 JSON 错误。
-
+- `hands`: 合并同通道同音色多轨(如左右手)力度基线。默认滑动中值窗口 2 拍,与自身基线差 `< 12` 的音符对齐声部基线,大于等于 12 的重音按相对差值保留。输出 JSON 包含 `notes_changed`、`accents_kept` 与声部前后平均力度。
+- `bars`: 按拍号与速度标记列出小节网格与小节内和声音高类分段(pitch-class sets)。只读分析,输出 JSON,供 LLM 与编排阅读。
+- `pedal`: 自动添加延音踏板(CC64)。在小节/和声交界前释放并在交界处重新踩下。`--mode` 可选 `bar`(每小节换)、`chord`(每和声段换)、`auto`(默认,琶音织体按和声换,其余按小节换)。默认不修改已有 CC64 的文件并返回 `already_pedaled`,加 `--replace` 允许覆盖。
+- 成功输出 JSON;失败码:`bad_input`、`parse_failed`、`unsupported_format`、`out_of_range`、`write_failed`。参数错误时 argparse 退出码为 2 并以 JSON 报告。
 示例:
 
 ```

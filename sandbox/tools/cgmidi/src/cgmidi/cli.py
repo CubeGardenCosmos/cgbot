@@ -12,9 +12,10 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import NoReturn
 
-from cgmidi import ops
+from cgmidi import ops, score
 from cgmidi.errors import BAD_INPUT, CgmidiError
 from cgmidi.files import load_midi, save_midi
+from cgmidi.hands import DEFAULT_ACCENT_GAP, merge_hands_midi
 
 Converter = Callable[[str, str], int]
 
@@ -28,7 +29,7 @@ class _Parser(argparse.ArgumentParser):
 def build_parser() -> argparse.ArgumentParser:
     parser = _Parser(
         prog="cgmidi",
-        description="MIDI 预处理:速度、移调、通道/音色/音库、静音独奏、裁剪",
+        description="MIDI 预处理:力度、踏板、小节分析、速度、移调、通道与裁剪",
     )
     sub = parser.add_subparsers(dest="command", required=True, parser_class=_Parser)
 
@@ -95,6 +96,59 @@ def build_parser() -> argparse.ArgumentParser:
     )
     proc.add_argument("--start", type=float, help="裁剪起点(秒,按原乐谱时间)")
     proc.add_argument("--end", type=float, help="裁剪终点(秒,按原乐谱时间)")
+
+    hands_p = sub.add_parser("hands", help="合并同通道同音色的多轨力度基线,保留重音")
+    hands_p.add_argument("input", help="输入 .mid 文件(只读)")
+    hands_p.add_argument("-o", "--output", required=True, help="输出 .mid 文件路径")
+    hands_p.add_argument(
+        "--channel",
+        action="append",
+        default=[],
+        metavar="CH",
+        help="只合并通道 1-16,可重复;默认所有符合要求的多轨通道",
+    )
+    hands_p.add_argument(
+        "--window-beats", type=float, default=2.0, help="滑动中值窗口半径(拍),默认 2"
+    )
+    hands_p.add_argument(
+        "--accent-gap",
+        type=int,
+        default=DEFAULT_ACCENT_GAP,
+        help="保留相对重音的最小力度差,默认 12",
+    )
+
+    bars_p = sub.add_parser("bars", help="按拍号与速度列出小节及和声音高类分段")
+    bars_p.add_argument("input", help="输入 .mid 文件")
+    bars_p.add_argument(
+        "--channel",
+        action="append",
+        default=[],
+        metavar="CH",
+        help="只分析通道 1-16,可重复;默认全部非鼓组通道",
+    )
+
+    pedal_p = sub.add_parser("pedal", help="按小节或和声变化编辑延音踏板 CC64")
+    pedal_p.add_argument("input", help="输入 .mid 文件(只读)")
+    pedal_p.add_argument("-o", "--output", required=True, help="输出 .mid 文件路径")
+    pedal_p.add_argument(
+        "--mode",
+        choices=["bar", "chord", "auto"],
+        default="auto",
+        help="bar 每小节换;chord 每和声段换;auto 琶音用 chord,其余用 bar",
+    )
+    pedal_p.add_argument(
+        "--channel",
+        action="append",
+        default=[],
+        metavar="CH",
+        help="目标通道 1-16,可重复;默认 GM 键盘通道",
+    )
+    pedal_p.add_argument(
+        "--replace", action="store_true", help="替换目标通道已有 CC64;默认检测到已有踏板就不修改"
+    )
+    pedal_p.add_argument(
+        "--gap-ticks", type=int, help="换踏板时边界前后各留的 tick 数,默认 1/16 拍"
+    )
     return parser
 
 
@@ -154,6 +208,16 @@ def _banks(items: list[str]) -> dict[int, tuple[int, int]]:
     return result
 
 
+def _channels(items: list[str]) -> set[int] | None:
+    return {_channel(text, "--channel") for text in items} if items else None
+
+
+def _check_output(input_path: str, output_path: str) -> Path:
+    if Path(output_path).resolve() == Path(input_path).resolve():
+        raise CgmidiError(BAD_INPUT, "输出路径不能与输入文件相同")
+    return Path(output_path)
+
+
 def _build_options(args: argparse.Namespace) -> ops.Options:
     return ops.Options(
         speed=args.speed,
@@ -174,11 +238,38 @@ def run(args: argparse.Namespace) -> dict[str, object]:
     if args.command == "info":
         return ops.describe(load_midi(args.input))
 
-    if Path(args.output).resolve() == Path(args.input).resolve():
-        raise CgmidiError(BAD_INPUT, "输出路径不能与输入文件相同")
+    if args.command == "bars":
+        return score.analyze_bars(load_midi(args.input), channels=_channels(args.channel))
+
+    if args.command == "hands":
+        output = _check_output(args.input, args.output)
+        result, report = merge_hands_midi(
+            load_midi(args.input),
+            channels=_channels(args.channel),
+            window_beats=args.window_beats,
+            accent_gap=args.accent_gap,
+        )
+        save_midi(result, output)
+        report["output"] = str(output)
+        return report
+
+    if args.command == "pedal":
+        output = _check_output(args.input, args.output)
+        result, report = score.apply_pedal(
+            load_midi(args.input),
+            mode=args.mode,
+            channels=_channels(args.channel),
+            replace=args.replace,
+            gap_ticks=args.gap_ticks,
+        )
+        if result is not None:
+            save_midi(result, output)
+            report["output"] = str(output)
+        return report
+
+    output = _check_output(args.input, args.output)
     opts = _build_options(args)
     result = ops.transform(load_midi(args.input), opts)
-    output = Path(args.output)
     save_midi(result, output)
     summary = ops.describe(result)
     return {
