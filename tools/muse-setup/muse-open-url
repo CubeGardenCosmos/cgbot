@@ -1,0 +1,25 @@
+#!/bin/sh
+# 浏览器 shim(xdg-open / x-www-browser / sensible-browser / gio open / $BROWSER 都指向它)。
+# 不打开浏览器:把 Manager 想打开的链接写入 /state/login-url.txt 并追加到
+# /state/browser-shim.log(只记录调用参数的个数和 URL),驱动脚本负责把它打印到控制台。
+# 链接含一次性的 OAuth 参数(state、code_challenge),不含密码或令牌。
+
+state_dir=${MUSE_SETUP_STATE:-/state}
+url=
+for a in "$@"; do
+  case "$a" in
+    http://*|https://*) url=$a ;;
+  esac
+done
+
+mkdir -p "$state_dir" 2>/dev/null
+if [ -z "$url" ]; then
+  printf '%s shim called without http(s) url (argc=%s)\n' "$(date -u +%FT%TZ)" "$#" >> "$state_dir/browser-shim.log"
+  exit 0
+fi
+
+tmp="$state_dir/.login-url.$$"
+printf '%s\n' "$url" > "$tmp" && mv -f "$tmp" "$state_dir/login-url.txt"
+printf '%s url=%s\n' "$(date -u +%FT%TZ)" "$url" >> "$state_dir/browser-shim.log"
+printf '==> OPEN THIS LINK IN YOUR BROWSER: %s\n' "$url" >&2
+exit 0

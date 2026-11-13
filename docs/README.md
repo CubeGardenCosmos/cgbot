@@ -15,6 +15,7 @@
 | 语音服务部署(SoVITS/FunASR) | [语音服务部署参考](reference/voice-services.md) |
 | 音色库(SF3 SoundFont 预设、许可证与下载) | [音色库参考](reference/soundfonts.md) |
 | Muse Sounds 采样器(开发期:官方库提取、样本布局与 catalog schema) | [MuseSampler 参考](reference/musesampler.md) |
+| Muse Sounds 一次性初始化容器(Manager 驱动、Windows Hub 许可导入、限制与测试) | [muse-setup 参考](reference/muse-setup.md) |
 | 角色卡语法与配置 | [角色卡参考](reference/character-card.md) |
 | 容器栈配置 | [caged/README.md](../caged/README.md) |
 | 许可证 | [LICENSE](../LICENSE) |
