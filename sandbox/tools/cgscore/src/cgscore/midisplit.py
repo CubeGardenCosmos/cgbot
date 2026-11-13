@@ -26,6 +26,14 @@ class _Group:
     is_drum: bool = False
     messages: list = field(default_factory=list)  # [(abs_tick, seq, msg)]
     initial_program: int = 0
+    source_channels: set[int] = field(default_factory=set)
+
+    @property
+    def source_channel(self) -> int | list[int]:
+        channels = self.source_channels or {(DRUM_CHANNEL if self.is_drum else self.channel) + 1}
+        if len(channels) == 1:
+            return next(iter(channels))
+        return sorted(channels)
 
 
 def _track_name(track: mido.MidiTrack) -> str:
@@ -79,6 +87,7 @@ def split_midi(mid: mido.MidiFile) -> list[_Group]:
             copied = copy.copy(msg)
             copied.time = 0
             group.messages.append((abs_tick, seq, copied))
+            group.source_channels.add(channel + 1)
             seq += 1
         _ = ti
 

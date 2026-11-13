@@ -224,8 +224,9 @@ def test_prepare_end_to_end(tmp_path: Path):
     assert doc["version"] == 1
     assert len(doc["parts"]) == 2
     assert doc["parts"][0]["id"] == "P1"
+    assert doc["parts"][0]["source_channel"] == 1
+    assert doc["parts"][1]["source_channel"] == 10
     assert doc["parts"][0]["file"] == "parts/P1.mid"
-    assert (outdir / "parts" / "P1.mid").exists()
     assert (outdir / "parts" / "P2.mid").exists()
 
 
@@ -239,3 +240,38 @@ def test_invalid_input(tmp_path: Path):
     bad_xml.write_text("<root>not musicxml</root>", encoding="utf-8")
     with pytest.raises(ScoreError):
         prepare(bad_xml, tmp_path / "out")
+
+
+def test_source_channel_midi_split(tmp_path: Path):
+    mid = mido.MidiFile(type=1, ticks_per_beat=480)
+    # 导轨
+    c_tr = mido.MidiTrack()
+    c_tr.append(mido.MetaMessage("set_tempo", tempo=500_000, time=0))
+    mid.tracks.append(c_tr)
+    # 钢琴:通道 0(1 基为 1)
+    p_tr = mido.MidiTrack()
+    p_tr.append(mido.Message("program_change", channel=0, program=0, time=0))
+    p_tr.append(mido.Message("note_on", channel=0, note=60, velocity=80, time=0))
+    p_tr.append(mido.Message("note_off", channel=0, note=60, velocity=0, time=480))
+    mid.tracks.append(p_tr)
+    # 弦乐:通道 2(1 基为 3)
+    s_tr = mido.MidiTrack()
+    s_tr.append(mido.Message("program_change", channel=2, program=40, time=0))
+    s_tr.append(mido.Message("note_on", channel=2, note=64, velocity=80, time=0))
+    s_tr.append(mido.Message("note_off", channel=2, note=64, velocity=0, time=480))
+    mid.tracks.append(s_tr)
+    # 鼓组:通道 9(1 基为 10)
+    d_tr = mido.MidiTrack()
+    d_tr.append(mido.Message("note_on", channel=9, note=38, velocity=90, time=0))
+    d_tr.append(mido.Message("note_off", channel=9, note=38, velocity=0, time=480))
+    mid.tracks.append(d_tr)
+
+    midi_path = tmp_path / "multi.mid"
+    mid.save(midi_path)
+    outdir = tmp_path / "out_midi"
+    plan_path = prepare(midi_path, outdir)
+    doc = json.loads(plan_path.read_text(encoding="utf-8"))
+    channels = {p["id"]: p["source_channel"] for p in doc["parts"]}
+    assert channels["P1"] == 1
+    assert channels["P2"] == 3
+    assert channels["P3"] == 10

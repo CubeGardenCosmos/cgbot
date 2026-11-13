@@ -196,6 +196,8 @@ class _PartOut:
     name: str = ""
     drum: bool = False
     program: int = 0
+    channel_hint: int | None = None
+    source_channel: int = 1
     notes: list[_Note] = field(default_factory=list)
     keys: list[tuple[int, int, bool]] = field(default_factory=list)
     tempos: list[_TempoEv] = field(default_factory=list)
@@ -709,9 +711,38 @@ def parse_score(data: bytes, filename: str):
         out.program = (
             decl.program if (decl and decl.program is not None) else guess_program(out.name.lower())
         )
+        if decl and decl.channel is not None:
+            out.channel_hint = decl.channel
         _play_part(out, measures, drum_pitch, total)
         parts.append(out)
 
+    used: set[int] = set()
+    for out in parts:
+        if out.drum:
+            out.source_channel = 10
+    for out in parts:
+        if out.drum or out.channel_hint is None:
+            continue
+        ch = out.channel_hint
+        if ch != 9 and ch not in used:
+            out.source_channel = ch + 1
+            used.add(ch)
+    pitched = [c for c in range(16) if c != 9]
+    next_free = 0
+    overflow = 0
+    for out in parts:
+        if out.drum or (out.channel_hint is not None and (out.channel_hint in used)):
+            continue
+        while next_free < len(pitched) and pitched[next_free] in used:
+            next_free += 1
+        if next_free < len(pitched):
+            ch = pitched[next_free]
+            out.source_channel = ch + 1
+            used.add(ch)
+        else:
+            ch = pitched[overflow % len(pitched)]
+            out.source_channel = ch + 1
+            overflow += 1
     tempos = [_TempoEv(0, DEFAULT_TEMPO_MICROS)]
     sigs = [_SigEv(0, 4, 4)]
     for part in parts:

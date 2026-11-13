@@ -34,6 +34,7 @@ class Part:
     gm_program: int = 0
     is_drum: bool = False
     channel: int = 0  # 0 基;鼓固定 9
+    source_channel: int | list[int] = 1  # 1 基,合并多通道时为 list
     muse_name: str = ""
     family: str = "other"
     engine_hint: str = "muse|fluidsynth|null"
@@ -56,6 +57,7 @@ def write_plan(parts: list[Part], source: str, outdir: Path) -> Path:
                 "family": p.family,
                 "gm_program": p.gm_program,
                 "is_drum": p.is_drum,
+                "source_channel": p.source_channel,
                 "muse_name": p.muse_name,
                 "engine_hint": p.engine_hint,
                 "mix": p.mix,
