@@ -9,6 +9,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <limits>
+#include <map>
 #include <memory>
 #include <optional>
 #include <string>
@@ -83,10 +84,11 @@ struct ChannelState {
   int velocity = 100;
 };
 
-std::vector<ChannelState> channel_states(const MidiSequence& sequence) {
-  std::vector<ChannelState> states(16);
+std::vector<ChannelState> channel_states(const MidiSequence& sequence, std::size_t num_channels) {
+  std::vector<ChannelState> states(num_channels);
   for (const MidiEvent& event : sequence.events) {
-    const int channel = event.status & 0x0F;
+    const int channel = event.channel;
+    if (channel < 0 || static_cast<std::size_t>(channel) >= num_channels) continue;
     switch (event.status & 0xF0) {
       case 0xC0:
         states[channel].program = event.data1;
@@ -103,6 +105,7 @@ std::vector<ChannelState> channel_states(const MidiSequence& sequence) {
   }
   return states;
 }
+
 
 // 通道内每个 pitch 的栈。SMF 允许同音高重叠;栈按后开先关配对,保证不丢失音符。
 struct OpenNote {
@@ -147,31 +150,58 @@ std::string family_for_gm(int program, bool is_drum) noexcept {
 
 std::vector<ChannelPlan> plan_channels(const MidiSequence& sequence,
                                        const RenderOptions& options, const Catalog& catalog) {
-  const std::vector<ChannelState> states = channel_states(sequence);
-  std::vector<ChannelPlan> plans(16);
-  for (int channel = 0; channel < 16; ++channel) {
+  std::size_t num_channels = 16;
+  for (const MidiEvent& event : sequence.events) {
+    if (static_cast<std::size_t>(event.channel + 1) > num_channels) {
+      num_channels = static_cast<std::size_t>(event.channel + 1);
+    }
+  }
+  if (sequence.channel_names.size() > num_channels) {
+    num_channels = sequence.channel_names.size();
+  }
+
+  const std::vector<ChannelState> states = channel_states(sequence, num_channels);
+  std::vector<ChannelPlan> plans(num_channels);
+  std::map<std::string, int> part_counts;
+
+  for (std::size_t channel = 0; channel < num_channels; ++channel) {
     ChannelPlan& plan = plans[channel];
-    plan.channel = channel;
+    plan.channel = static_cast<int>(channel);
     plan.program = states[channel].program;
-    plan.sends = initial_sends(options.reverb.channel_send, channel);
+    plan.part_name = channel < sequence.channel_names.size() ? sequence.channel_names[channel] : "";
+    plan.sends = initial_sends(options.reverb.channel_send, static_cast<int>(channel % 16));
     if (!states[channel].used) continue;
-    plan.instrument_id = pick_instrument(plan.program, channel == kDrumChannel, catalog);
+
+    const bool is_drum = (channel < sequence.channel_is_drum.size())
+                             ? sequence.channel_is_drum[channel]
+                             : (channel == static_cast<std::size_t>(kDrumChannel));
+
+    // 计算同类声部的出现次数(0, 1, ...)
+    std::string norm_name = plan.part_name;
+    for (char& c : norm_name) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    std::string key = norm_name;
+    if (key.find("flute") != std::string::npos || key.find("flauto") != std::string::npos) key = "flute";
+    else if (key.find("violin") != std::string::npos) key = "violin";
+    const int occ = part_counts[key]++;
+
+    plan.instrument_id = pick_instrument_by_name(plan.part_name, plan.program, is_drum, catalog, occ);
     if (plan.instrument_id) {
       const MuseInstrument& instrument = find_instrument(catalog, *plan.instrument_id);
       plan.instrument_name = instrument.name;
       plan.family = instrument.family;
     } else {
       plan.instrument_name = "";
-      plan.family = family_for_gm(plan.program, channel == kDrumChannel);
+      plan.family = family_for_gm(plan.program, is_drum);
     }
     plan.notes.reserve(256);
   }
 
-  std::array<std::array<std::vector<OpenNote>, 128>, 16> open;
+  std::vector<std::array<std::vector<OpenNote>, 128>> open(num_channels);
   for (const MidiEvent& event : sequence.events) {
-    const int channel = event.status & 0x0F;
+    const int channel = event.channel;
+    if (channel < 0 || static_cast<std::size_t>(channel) >= num_channels) continue;
     ChannelPlan& plan = plans[channel];
-    update_sends(options.reverb.channel_send, channel, event, plan.sends);
+    update_sends(options.reverb.channel_send, channel % 16, event, plan.sends);
     if (!states[channel].used) continue;
     const int pitch = event.data1;
     switch (event.status & 0xF0) {
@@ -190,7 +220,7 @@ std::vector<ChannelPlan> plan_channels(const MidiSequence& sequence,
         break;
     }
   }
-  for (int channel = 0; channel < 16; ++channel) {
+  for (std::size_t channel = 0; channel < num_channels; ++channel) {
     if (!states[channel].used) continue;
     for (int pitch = 0; pitch < 128; ++pitch) {
       while (!open[channel][static_cast<std::size_t>(pitch)].empty()) {
@@ -202,6 +232,26 @@ std::vector<ChannelPlan> plan_channels(const MidiSequence& sequence,
     plans[channel].sends.used = true;
   }
 
+  // 按通道的拨奏切换列表更新音符的关节标志
+  for (std::size_t channel = 0; channel < num_channels; ++channel) {
+    if (!states[channel].used) continue;
+    if (channel >= sequence.pizzicato_ranges.size()) continue;
+    const std::vector<PizzicatoEv>& pizz_evs = sequence.pizzicato_ranges[channel];
+    if (pizz_evs.empty()) continue;
+    ChannelPlan& plan = plans[channel];
+    // 对每个音符,找切换列表中最后一个 seconds <= note._location_us/1e6 的事件
+    for (abi::ms_NoteEvent_5& note : plan.notes) {
+      const double note_seconds = static_cast<double>(note._location_us) / 1'000'000.0;
+      bool pizz = false;
+      for (const PizzicatoEv& pev : pizz_evs) {
+        if (pev.seconds <= note_seconds) pizz = pev.pizz;
+        else break;
+      }
+      if (pizz) {
+        note._articulation = abi::kArticulationPizzicato;
+      }
+    }
+  }
   plans.erase(std::remove_if(plans.begin(), plans.end(),
                              [](const ChannelPlan& plan) { return plan.notes.empty(); }),
               plans.end());
@@ -323,8 +373,32 @@ DryRender render_dry(const MuseLib& lib, const std::vector<ChannelPlan>& plans,
   return result;
 }
 
-// 回落到 FluidSynth(GM 音源)的通道先削 12 dB,再进入混音,避免盖过 Muse 采样音色。
+// 计算立体声音频的 RMS(dBFS)
+double stem_rms_dbfs(const Audio& stem) {
+  if (stem.channels.empty() || stem.channels[0].empty()) return -120.0;
+  double sum = 0.0;
+  std::size_t total_samples = 0;
+  for (const auto& ch : stem.channels) {
+    for (float sample : ch) {
+      sum += static_cast<double>(sample) * static_cast<double>(sample);
+    }
+    total_samples += ch.size();
+  }
+  if (total_samples == 0 || sum <= 0.0) return -120.0;
+  const double rms = std::sqrt(sum / static_cast<double>(total_samples));
+  if (rms <= 1e-6) return -120.0;
+  return 20.0 * std::log10(rms);
+}
+
+// 回落到 FluidSynth(GM 音源)的通道及 Muse 打击乐声部先削 12 dB,避免盖过其他 Muse 采样音色。
 constexpr float kFallbackGain = 0.25118864F;  // 10^(-12/20)
+
+// 判断声部是否为打击乐家族(需削 12 dB)
+bool is_percussion_family(std::string_view family, std::string_view instrument) {
+  if (family == "percussion" || family == "drumline") return true;
+  return instrument.find("Drum") != std::string_view::npos ||
+         instrument.find("Perc") != std::string_view::npos;
+}
 
 Audio mix_hybrid(const DryRender& dry, const std::vector<ChannelPlan>& muse_plans,
                  const std::vector<Audio>& fallback_stems,
@@ -360,13 +434,20 @@ Audio mix_hybrid(const DryRender& dry, const std::vector<ChannelPlan>& muse_plan
 
   std::vector<MixInput> stems;
   stems.reserve(muse_plans.size() + fallback_plans.size());
+  std::vector<double> muse_stem_rms(muse_plans.size(), -120.0);
   for (std::size_t i = 0; i < muse_plans.size(); ++i) {
     const ChannelPlan& plan = muse_plans[i];
+    muse_stem_rms[i] = stem_rms_dbfs(dry.stems[i]);
     MixInput input;
     input.family = plan.family;
     input.channel = plan.channel + 1;
     input.left = dry.stems[i].channels[0];
     input.right = dry.stems[i].channels[1];
+    // Muse 打击乐家族(Drum Kit 等)施加 -12 dB 衰减,与 FluidSynth 回退保持同等平衡
+    if (is_percussion_family(plan.family, plan.instrument_name)) {
+      for (float& sample : input.left) sample *= kFallbackGain;
+      for (float& sample : input.right) sample *= kFallbackGain;
+    }
     input.reverb_send = plan.sends.reverb;
     stems.push_back(std::move(input));
   }
@@ -383,6 +464,7 @@ Audio mix_hybrid(const DryRender& dry, const std::vector<ChannelPlan>& muse_plan
     stems.push_back(std::move(input));
   }
 
+
   MixOptions mix;
   mix.reverb_room = options.reverb.room.value_or(0.75);
   mix.reverb_level = options.reverb.level.value_or(1.0);
@@ -396,9 +478,11 @@ Audio mix_hybrid(const DryRender& dry, const std::vector<ChannelPlan>& muse_plan
     report->reverb_level = mix.reverb_level;
     report->dry_seconds = dry.seconds;
     report->mix_report = mixed.report;
-    for (const ChannelPlan& plan : muse_plans) {
+    for (std::size_t i = 0; i < muse_plans.size(); ++i) {
+      const ChannelPlan& plan = muse_plans[i];
       report->tracks.push_back({plan.channel + 1, plan.program, *plan.instrument_id,
-                                plan.instrument_name, plan.family, plan.notes.size()});
+                                plan.instrument_name, plan.family, plan.notes.size(),
+                                muse_stem_rms[i]});
     }
   }
   Audio mastered;

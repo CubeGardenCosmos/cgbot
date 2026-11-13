@@ -1,6 +1,8 @@
 #include "muse/mapping.hpp"
 
 #include <algorithm>
+#include <cctype>
+#include <string>
 #include <string_view>
 
 namespace cgmusic {
@@ -135,6 +137,121 @@ std::optional<int> pick_instrument(int gm_program, bool is_drum, const Catalog& 
     if (const auto id = find_candidate(catalog, candidate)) return id;
   }
   return std::nullopt;
+}
+// 声部名关键词到优先候选音色表
+static std::optional<int> find_catalog_named(const Catalog& catalog, const char* name) {
+  if (name == nullptr) return std::nullopt;
+  const auto it = std::find_if(catalog.begin(), catalog.end(),
+                               [&](const MuseInstrument& item) { return item.name == name; });
+  if (it != catalog.end()) return it->id;
+  return std::nullopt;
+}
+
+std::string lower_ascii(std::string_view s) {
+  std::string out(s);
+  for (char& c : out) {
+    if (c >= 'A' && c <= 'Z') c = static_cast<char>(c - 'A' + 'a');
+  }
+  return out;
+}
+
+std::optional<int> pick_instrument_by_name(std::string_view part_name, int gm_program,
+                                           bool is_drum, const Catalog& catalog,
+                                           int occurrence) {
+  if (!part_name.empty()) {
+    const std::string lowered = lower_ascii(part_name);
+
+    // 打击乐 / 鼓组
+    if (lowered.find("drum") != std::string::npos || lowered.find("percussion") != std::string::npos) {
+      if (auto id = find_catalog_named(catalog, "Drum Kit")) return id;
+      if (auto id = find_catalog_named(catalog, "GM Kit")) return id;
+    }
+
+    // 手风琴 -> 强制回退 FluidSynth
+    if (lowered.find("accordion") != std::string::npos) {
+      return std::nullopt;
+    }
+
+    // 长笛:Flute 1 / Flute 2
+    if (lowered.find("flute") != std::string::npos || lowered.find("flauto") != std::string::npos) {
+      const bool prefer_flute2 = (lowered.find("2") != std::string::npos) ||
+                                 (occurrence >= 1 && lowered.find("1") == std::string::npos);
+      if (prefer_flute2) {
+        if (auto id = find_catalog_named(catalog, "Flute 2")) return id;
+        if (auto id = find_catalog_named(catalog, "Flute 1")) return id;
+      } else {
+        if (auto id = find_catalog_named(catalog, "Flute 1")) return id;
+        if (auto id = find_catalog_named(catalog, "Flute 2")) return id;
+      }
+    }
+
+    // 低音单簧管 (先于普通单簧管匹配)
+    if (lowered.find("bass clarinet") != std::string::npos) {
+      if (auto id = find_catalog_named(catalog, "Bass Clarinet")) return id;
+    }
+
+    // 单簧管
+    if (lowered.find("clarinet") != std::string::npos) {
+      if (auto id = find_catalog_named(catalog, "Clarinet in Bb")) return id;
+    }
+
+    // 大管 / 巴松
+    if (lowered.find("bassoon") != std::string::npos) {
+      if (auto id = find_catalog_named(catalog, "Bassoon")) return id;
+    }
+
+    // 圆号
+    if (lowered.find("french horn") != std::string::npos || lowered.find("horn") != std::string::npos) {
+      if (auto id = find_catalog_named(catalog, "French Horn")) return id;
+      if (auto id = find_catalog_named(catalog, "French Horns a6")) return id;
+    }
+
+    // 小号
+    if (lowered.find("trumpet") != std::string::npos) {
+      if (auto id = find_catalog_named(catalog, "Trumpet")) return id;
+      if (auto id = find_catalog_named(catalog, "Trumpets a4")) return id;
+    }
+
+    // 低音提琴 (Contrabasses / Basses)
+    if (lowered.find("contrabass") != std::string::npos || lowered.find("double bass") != std::string::npos ||
+        lowered == "basses" || lowered == "bass") {
+      if (auto id = find_catalog_named(catalog, "Contrabasses")) return id;
+      if (auto id = find_catalog_named(catalog, "Basses")) return id;
+    }
+
+    // 大提琴
+    if (lowered.find("violoncello") != std::string::npos || lowered.find("cello") != std::string::npos) {
+      if (auto id = find_catalog_named(catalog, "Cellos")) return id;
+      if (auto id = find_catalog_named(catalog, "Cello Solo")) return id;
+    }
+
+    // 中提琴
+    if (lowered.find("viola") != std::string::npos) {
+      if (auto id = find_catalog_named(catalog, "Violas")) return id;
+      if (auto id = find_catalog_named(catalog, "Viola Solo")) return id;
+    }
+
+    // 小提琴:Violins 1 / Violins 2
+    if (lowered.find("violin") != std::string::npos) {
+      const bool prefer_vln2 = (lowered.find("2") != std::string::npos) ||
+                               (occurrence >= 1 && lowered.find("1") == std::string::npos);
+      if (prefer_vln2) {
+        if (auto id = find_catalog_named(catalog, "Violins 2")) return id;
+        if (auto id = find_catalog_named(catalog, "Violins 1")) return id;
+      } else {
+        if (auto id = find_catalog_named(catalog, "Violins 1")) return id;
+        if (auto id = find_catalog_named(catalog, "Violins 2")) return id;
+      }
+    }
+
+    // 钢琴
+    if (lowered.find("piano") != std::string::npos) {
+      if (auto id = find_catalog_named(catalog, "Piano")) return id;
+      if (auto id = find_catalog_named(catalog, "Upright Piano")) return id;
+    }
+  }
+  // 名称无匹配,回退到程序号查找
+  return pick_instrument(gm_program, is_drum, catalog);
 }
 
 }  // namespace cgmusic

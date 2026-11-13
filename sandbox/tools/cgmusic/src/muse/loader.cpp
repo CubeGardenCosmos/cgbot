@@ -25,7 +25,14 @@ std::string join(const std::vector<std::string>& names) {
   return out;
 }
 
-std::string text_or_empty(const char* value) { return value != nullptr ? value : ""; }
+std::string text_or_empty(const char* value) {
+  if (value == nullptr) return "";
+  std::string s(value);
+  const auto first = s.find_first_not_of(" \t\r\n");
+  if (first == std::string::npos) return "";
+  const auto last = s.find_last_not_of(" \t\r\n");
+  return s.substr(first, last - first + 1);
+}
 
 template <typename Fn>
 auto abi_call(const char* name, Fn&& fn) -> decltype(fn()) {

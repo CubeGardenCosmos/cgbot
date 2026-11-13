@@ -107,6 +107,7 @@ struct MuseTrackReport {
   std::string instrument;
   std::string family;
   std::size_t note_count = 0;
+  double rms_dbfs = 0.0;  // 干声 RMS(dBFS);0 表示未计算
 };
 
 struct MuseRenderResult {

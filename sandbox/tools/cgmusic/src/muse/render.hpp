@@ -18,6 +18,7 @@ namespace cgmusic::muse {
 struct ChannelPlan {
   int channel = 0;  // 索引 0-15
   int program = 0;
+  std::string part_name;  // 来自 MusicXML 声部名或 SMF 轨道名;空串表示未知
   std::optional<int> instrument_id;
   std::string instrument_name;
   std::string family;

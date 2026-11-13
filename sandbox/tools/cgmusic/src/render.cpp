@@ -396,15 +396,17 @@ Audio render_fluidsynth_channel(const MidiSequence& sequence, int channel,
   const int sfont_id = load_font(synth.get(), soundfont.path);
   const auto presets = preset_keys(read_presets(font_of(synth.get(), sfont_id)));
 
-  std::array<int, 16> bank_msb{};
-  std::array<ChannelSends, 16> sends{};
-  for (int ch = 0; ch < 16; ++ch) {
-    sends[ch] = initial_sends(options.reverb.channel_send, ch);
-  }
-
-  const int init_bank = channel == kDrumChannel ? kDrumBank : 0;
+  const bool is_drum = (channel == kDrumChannel) ||
+                       (static_cast<std::size_t>(channel) < sequence.channel_is_drum.size() &&
+                        sequence.channel_is_drum[static_cast<std::size_t>(channel)]);
+  const int synth_ch = is_drum ? kDrumChannel : 0;
+  const int init_bank = is_drum ? kDrumBank : 0;
   const PresetKey init_preset = resolve_preset(presets, PresetKey{init_bank, 0});
-  fluid_synth_program_select(synth.get(), channel, sfont_id, init_preset.bank, init_preset.program);
+  fluid_synth_program_select(synth.get(), synth_ch, sfont_id, init_preset.bank, init_preset.program);
+
+  int bank_msb = 0;
+  ChannelSends sends = initial_sends(options.reverb.channel_send, channel % 16);
+
 
   Audio audio;
   audio.rate = kSampleRate;
@@ -432,46 +434,45 @@ Audio render_fluidsynth_channel(const MidiSequence& sequence, int channel,
   };
 
   for (const MidiEvent& event : sequence.events) {
-    const int ch = event.status & 0x0F;
-    if (ch != channel) continue;
+    if (event.channel != channel) continue;
     render_until(static_cast<std::size_t>(std::llround(event.seconds * rate)));
 
     switch (event.status & 0xF0) {
       case 0x80:
-        fluid_synth_noteoff(synth.get(), ch, event.data1);
+        fluid_synth_noteoff(synth.get(), synth_ch, event.data1);
         break;
       case 0x90:
         if (event.data2 == 0) {
-          fluid_synth_noteoff(synth.get(), ch, event.data1);
+          fluid_synth_noteoff(synth.get(), synth_ch, event.data1);
         } else {
-          fluid_synth_noteon(synth.get(), ch, event.data1, event.data2);
+          fluid_synth_noteon(synth.get(), synth_ch, event.data1, event.data2);
         }
         break;
       case 0xA0:
-        fluid_synth_key_pressure(synth.get(), ch, event.data1, event.data2);
+        fluid_synth_key_pressure(synth.get(), synth_ch, event.data1, event.data2);
         break;
       case 0xB0:
         if (event.data1 == kBankSelectMsb) {
-          bank_msb[ch] = event.data2;
+          bank_msb = event.data2;
         } else if (event.data1 == kReverbCc || event.data1 == kChorusCc) {
-          update_sends(options.reverb.channel_send, ch, event, sends[ch]);
+          update_sends(options.reverb.channel_send, channel % 16, event, sends);
         } else {
-          fluid_synth_cc(synth.get(), ch, event.data1, event.data2);
+          fluid_synth_cc(synth.get(), synth_ch, event.data1, event.data2);
         }
         break;
       case 0xC0: {
-        const int bank = ch == kDrumChannel ? kDrumBank : bank_msb[ch];
+        const int bank = is_drum ? kDrumBank : bank_msb;
         const PresetKey wanted{bank, event.data1};
         const PresetKey preset = resolve_preset(presets, wanted);
-        fluid_synth_program_select(synth.get(), ch, sfont_id, preset.bank, preset.program);
-        update_sends(options.reverb.channel_send, ch, event, sends[ch]);
+        fluid_synth_program_select(synth.get(), synth_ch, sfont_id, preset.bank, preset.program);
+        update_sends(options.reverb.channel_send, channel % 16, event, sends);
         break;
       }
       case 0xD0:
-        fluid_synth_channel_pressure(synth.get(), ch, event.data1);
+        fluid_synth_channel_pressure(synth.get(), synth_ch, event.data1);
         break;
       case 0xE0:
-        fluid_synth_pitch_bend(synth.get(), ch,
+        fluid_synth_pitch_bend(synth.get(), synth_ch,
                                event.data1 | (static_cast<int>(event.data2) << 7));
         break;
       default:

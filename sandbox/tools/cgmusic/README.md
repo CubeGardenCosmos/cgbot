@@ -28,6 +28,9 @@ cgmusic analyze <audio>
 - 库调用异常保护：所有跨 C ABI 的库调用（`add_track`、`init`、`process_offline` 等）均包裹在 try/catch 中，转换为结构化 JSON 错误输出，避免未捕获异常导致 `std::terminate` 崩溃。
 - Muse 与回退通道干声按乐器族进入 `src/mix/` 的自动平衡、混响发送、总线混响与 -14 LUFS / -1.5 dBTP 母带；输出 JSON 的 `muse.tracks` 给出 Muse 轨道报告，`muse.mix` 给出整体混音报告。
 - Muse 引擎的母带在线性增益之前多一级动态处理(`src/mix/dynamics.cpp`,仅 `--engine muse`;fluidsynth 路径不经过,逐位不变,有测试):声道联动前馈总线压缩(阈值 = 输入积分响度 +3 dB,比率 2.5:1,6 dB 软拐点,侧链 100 Hz 高通,攻击 30 ms,两级释放 120 ms/900 ms)→ 自动补偿增益至目标响度 → 5 ms 前瞻峰值限制(上限 = 真峰值上限 -0.5 dB)→ 原有迭代真峰值母带。`muse.mix.loudness.dynamics` 报告 `threshold_db`、`ratio`、`max_gain_reduction_db`、`avg_gain_reduction_db`、`makeup_db`。参数取值与实测见 [docs/reference/musesampler.md](../../../docs/reference/musesampler.md) §21;未做听感验收。
+- MusicXML 声部独立性与音色映射：MusicXML 路径直接解析为独立虚拟通道序列（不受 SMF 16 通道限制），声部名作为 Muse 音色主键（Flute 1/2、Clarinet in Bb、Bass Clarinet、Bassoon、French Horn、Trumpet、Violins 1/2、Violas、Cellos、Contrabasses、Drum Kit、Accordion 显式回退等），消除 16 通道碰撞导致的声部覆盖；MIDI 输入因无声部名仍走 GM 程序号查找（见文档 §22）。
+- 拨奏（Pizzicato）关节支持：MusicXML 中的 `<technical><pizzicato/>` 与方向词 `pizz.` / `arco` / `<sound pizzicato="yes|no"/>` 在音符级别设定 MuseSampler `kArticulationPizzicato`（弓奏恢复 `kArticulationNone`）。
+- 打击乐平衡与干声 RMS：Muse 打击乐家族干声在 `mix_hybrid` 中先施加 -12 dB 衰减，与 FluidSynth 回退通道平衡一致；`muse.tracks` 数组为每个通道额外暴露干声 `rms_dbfs`。
 - 默认输出目录 `/workspace/artifacts/music/`。
 - `--gain G`:相对 -14 LUFS 目标的 dB 偏移,限 ±12;真峰值上限仍为 -1.5 dBTP。
 - `--reverb CH=0-127`(可重复):MIDI 通道 1-16 的混响发送(CC91),优先级最高,覆盖文件中的 CC91 与默认表。

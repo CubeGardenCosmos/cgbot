@@ -254,6 +254,12 @@ struct NoteEv {
     int velocity;
 };
 
+// 拨奏切换事件(仅内部使用,在 musicxml_to_sequence 中填充到 MidiSequence)
+struct PartPizzEv {
+    i64 tick;    // 480 PPQ tick
+    bool pizz;   // true = 拨奏, false = 弓奏
+};
+
 struct PartOut {
     std::string name;
     bool drum = false;
@@ -265,7 +271,9 @@ struct PartOut {
     std::vector<KeyEv> keys;
     std::vector<TempoEv> tempos;
     std::vector<SigEv> sigs;
+    std::vector<PartPizzEv> pizz_events;  // 拨奏/弓奏切换(tick 顺序)
 };
+
 
 struct Conductor {
     std::vector<TempoEv> tempos;
@@ -288,6 +296,7 @@ struct PartState {
     i64 beat_type = 4;
     int transpose = 0;  // 半音,声部移调(chromatic + 12*octave-change)
     int velocity = kDefaultVelocity;
+    bool pizz = false;  // 当前拨奏状态
     // (声部号, 音高) -> 尚未结束的连音音符下标
     std::map<std::pair<std::string, int>, std::size_t> open_ties;
 };
@@ -734,18 +743,38 @@ std::optional<double> metronome_bpm(xml_node metronome) {
     return count * quarters * (2.0 - std::pow(0.5, dots));
 }
 
-void apply_sound(xml_node sound, PartState& st, std::optional<double>& tempo) {
+// 拨奏/弓奏词:检测常见拼写,不分大小写(已对调用方使用 lower())
+bool is_pizz_word(std::string_view word) {
+    return word == "pizz." || word == "pizz";
+}
+bool is_arco_word(std::string_view word) {
+    return word == "arco." || word == "arco";
+}
+
+// 若拨奏状态发生变化则追加切换事件。
+void set_pizz(bool new_pizz, i64 tick, PartState& st, PartOut& out) {
+    if (st.pizz != new_pizz) {
+        st.pizz = new_pizz;
+        out.pizz_events.push_back(PartPizzEv{tick, new_pizz});
+    }
+}
+
+void apply_sound(xml_node sound, i64 tick, PartState& st, PartOut& out, std::optional<double>& tempo) {
     const std::string_view tempo_text = attr_of(sound, "tempo");
     if (!tempo_text.empty()) tempo = parse_number(tempo_text, "Invalid sound tempo");
     const std::string_view dynamics_text = attr_of(sound, "dynamics");
     if (!dynamics_text.empty()) {
         st.velocity = velocity_from_percent(parse_number(dynamics_text, "Invalid sound dynamics"));
     }
+    // <sound pizzicato="yes|no"/>
+    const std::string_view pizz_attr = attr_of(sound, "pizzicato");
+    if (pizz_attr == "yes") set_pizz(true, tick, st, out);
+    else if (pizz_attr == "no") set_pizz(false, tick, st, out);
 }
 
 void handle_sound(xml_node sound, i64 tick, PartState& st, PartOut& out) {
     std::optional<double> tempo;
-    apply_sound(sound, st, tempo);
+    apply_sound(sound, tick, st, out, tempo);
     if (tempo) add_tempo(out, tick, *tempo);
 }
 
@@ -764,10 +793,15 @@ void handle_direction(xml_node direction, i64 tick, PartState& st, PartOut& out)
                     }
                 } else if (kind_tag == "metronome") {
                     metronome = metronome_bpm(kind);
+                } else if (kind_tag == "words") {
+                    // 检测拨奏/弓奏指示词
+                    const std::string word = lower(value_of(kind));
+                    if (is_pizz_word(word)) set_pizz(true, tick, st, out);
+                    else if (is_arco_word(word)) set_pizz(false, tick, st, out);
                 }
             }
         } else if (tag == "sound") {
-            apply_sound(item, st, sound_tempo);
+            apply_sound(item, tick, st, out, sound_tempo);
         }
     }
     if (metronome) {
@@ -821,6 +855,17 @@ void play_note(xml_node note, i64& cursor, i64& last_onset, PartState& st, PartO
     const bool cue = static_cast<bool>(note.child("cue"));
     const i64 length = grace ? kGraceTicks : duration_ticks(note, st);
     const i64 start = (chord && !grace) ? last_onset : cursor;
+
+    // 检测 <notations><technical><pizzicato/> 触发拨奏;arco 仅靠 direction 切换
+    for (xml_node notations : note.children()) {
+        if (name_of(notations) != "notations") continue;
+        for (xml_node tech : notations.children()) {
+            if (name_of(tech) != "technical") continue;
+            if (tech.child("pizzicato")) {
+                set_pizz(true, start, st, out);
+            }
+        }
+    }
 
     if (!rest && !cue) {
         const int pitch = pitch_of(note, out.drum, st.transpose, drum_pitch);
@@ -1116,7 +1161,10 @@ bool is_zip_data(const Bytes& data) {
 
 }  // namespace
 
-std::vector<std::uint8_t> musicxml_to_midi(const std::vector<std::uint8_t>& data, std::string_view filename) {
+// 解析 MusicXML 并返回声部列表与指挥轨道(共享实现)。
+// 调用方负责后续的 encode_smf 或序列化。
+static void parse_xml_parts(const std::vector<std::uint8_t>& data, std::string_view filename,
+                             std::vector<PartOut>& parts, Conductor& conductor) {
     Bytes unpacked;
     const Bytes* xml = &data;
     const std::string lowered_name = lower(filename);
@@ -1148,7 +1196,6 @@ std::vector<std::uint8_t> musicxml_to_midi(const std::vector<std::uint8_t>& data
     }
 
     const Declarations decl = read_declarations(root);
-    std::vector<PartOut> parts;
     parts.reserve(sources.size());
     std::size_t total_notes = 0;
     for (const PartSource& src : sources) {
@@ -1170,7 +1217,6 @@ std::vector<std::uint8_t> musicxml_to_midi(const std::vector<std::uint8_t>& data
     }
     assign_channels(parts);
 
-    Conductor conductor;
     conductor.tempos.push_back(TempoEv{0, kDefaultTempoMicros});
     conductor.sigs.push_back(SigEv{0, 4, 4});
     for (const PartOut& part : parts) {
@@ -1179,8 +1225,104 @@ std::vector<std::uint8_t> musicxml_to_midi(const std::vector<std::uint8_t>& data
     }
     settle_by_tick(conductor.tempos);
     settle_by_tick(conductor.sigs);
+}
 
+std::vector<std::uint8_t> musicxml_to_midi(const std::vector<std::uint8_t>& data,
+                                           std::string_view filename) {
+    std::vector<PartOut> parts;
+    Conductor conductor;
+    parse_xml_parts(data, filename, parts, conductor);
     return encode_smf(parts, conductor);
+}
+
+MidiSequence musicxml_to_sequence(const std::vector<std::uint8_t>& data,
+                                  std::string_view filename) {
+    std::vector<PartOut> parts;
+    Conductor conductor;
+    parse_xml_parts(data, filename, parts, conductor);
+
+    // 基于 conductor.tempos 建立 tick -> seconds 映射(与 480 PPQ 速度表算法完全一致)
+    struct TempoSeg {
+        i64 tick;
+        double seconds;
+        double micros;
+    };
+    std::vector<TempoSeg> segs;
+    constexpr double kPpqD = 480.0;
+    segs.push_back({0, 0.0, static_cast<double>(kDefaultTempoMicros)});
+    for (const TempoEv& t : conductor.tempos) {
+        if (t.tick == 0) {
+            segs[0].micros = static_cast<double>(t.micros);
+            continue;
+        }
+        TempoSeg& last = segs.back();
+        const double dtick = static_cast<double>(t.tick - last.tick);
+        const double dsec = dtick * (last.micros / (kPpqD * 1'000'000.0));
+        if (t.tick == last.tick) {
+            last.micros = static_cast<double>(t.micros);
+        } else {
+            segs.push_back({t.tick, last.seconds + dsec, static_cast<double>(t.micros)});
+        }
+    }
+    const auto tick_to_seconds = [&](i64 tick) -> double {
+        const auto it = std::upper_bound(segs.begin(), segs.end(), tick,
+            [](i64 val, const TempoSeg& s) { return val < s.tick; });
+        const TempoSeg& s = *(it - 1);
+        return s.seconds + static_cast<double>(tick - s.tick) * (s.micros / (kPpqD * 1'000'000.0));
+    };
+
+    MidiSequence sequence;
+    for (const auto& s : segs) {
+        sequence.tempo_map.push_back({static_cast<std::uint64_t>(s.tick), s.seconds,
+                                      static_cast<std::uint32_t>(std::lround(s.micros))});
+    }
+
+    const std::size_t nparts = parts.size();
+    sequence.channel_names.resize(nparts);
+    sequence.channel_is_drum.resize(nparts);
+    sequence.pizzicato_ranges.resize(nparts);
+
+    double max_time = 0.0;
+    for (std::size_t i = 0; i < nparts; ++i) {
+        const PartOut& part = parts[i];
+        const int ch = static_cast<int>(i);
+        sequence.channel_names[i] = part.name;
+        sequence.channel_is_drum[i] = part.drum;
+
+        // 程序变更事件(刻 0)
+        const std::uint8_t status_pc = static_cast<std::uint8_t>(0xC0 | (i & 0x0F));
+        sequence.events.push_back({0.0, status_pc, static_cast<std::uint8_t>(part.program), 0, ch});
+
+        // 音符开关
+        for (const NoteEv& note : part.notes) {
+            const double t_start = tick_to_seconds(note.start);
+            const double t_end = tick_to_seconds(note.end);
+            max_time = std::max(max_time, t_end);
+
+            const std::uint8_t status_on = static_cast<std::uint8_t>(0x90 | (i & 0x0F));
+            const std::uint8_t status_off = static_cast<std::uint8_t>(0x80 | (i & 0x0F));
+            sequence.events.push_back({t_start, status_on, static_cast<std::uint8_t>(note.pitch),
+                                       static_cast<std::uint8_t>(note.velocity), ch});
+            sequence.events.push_back({t_end, status_off, static_cast<std::uint8_t>(note.pitch), 0, ch});
+        }
+
+        // 拨奏事件
+        for (const PartPizzEv& pev : part.pizz_events) {
+            sequence.pizzicato_ranges[i].push_back({tick_to_seconds(pev.tick), pev.pizz});
+        }
+    }
+
+    sequence.duration_s = max_time;
+    // 按时间排序;同刻先 note-off,再 PC,最后 note-on
+    std::stable_sort(sequence.events.begin(), sequence.events.end(),
+                     [](const MidiEvent& a, const MidiEvent& b) {
+                         if (a.seconds != b.seconds) return a.seconds < b.seconds;
+                         const int prio_a = (a.status & 0xF0) == 0x80 ? 0 : ((a.status & 0xF0) == 0xC0 ? 1 : 2);
+                         const int prio_b = (b.status & 0xF0) == 0x80 ? 0 : ((b.status & 0xF0) == 0xC0 ? 1 : 2);
+                         return prio_a < prio_b;
+                     });
+
+    return sequence;
 }
 
 }  // namespace cgmusic

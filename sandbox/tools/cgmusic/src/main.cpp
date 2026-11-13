@@ -195,13 +195,17 @@ int cmd_render(int argc, char** argv) {
   options.reverb = parse_reverb_options(args);
 
   const std::vector<std::uint8_t> data = read_file(input, kMaxInputBytes);
-  std::vector<std::uint8_t> midi;
-  if (data.size() >= 4 && std::memcmp(data.data(), "MThd", 4) == 0) {
-    midi = data;
+  const bool is_midi = data.size() >= 4 && std::memcmp(data.data(), "MThd", 4) == 0;
+  MidiSequence sequence;
+  if (is_midi) {
+    sequence = parse_midi(data);
+  } else if (engine == RenderEngine::Muse) {
+    // Muse 路径直接获取含声部名与拨奏扩展的序列,避免 SMF 往返丢失信息
+    sequence = musicxml_to_sequence(data, input.filename().string());
   } else {
-    midi = musicxml_to_midi(data, input.filename().string());
+    // FluidSynth 路径保持 SMF 字节流解析完全不变
+    sequence = parse_midi(musicxml_to_midi(data, input.filename().string()));
   }
-  const MidiSequence sequence = parse_midi(midi);
 
   RenderReport report;
   MuseRenderResult muse_report;
@@ -301,7 +305,8 @@ int cmd_render(int argc, char** argv) {
                 << ",\"instrument_id\":" << track.instrument_id
                 << ",\"instrument\":" << json_string(track.instrument)
                 << ",\"family\":" << json_string(track.family)
-                << ",\"notes\":" << track.note_count << "}";
+                << ",\"notes\":" << track.note_count
+                << ",\"rms_dbfs\":" << number(track.rms_dbfs) << "}";
     }
     std::cout << "],\"mix\":" << muse_report.mix_report << "}";
   }

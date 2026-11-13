@@ -6,8 +6,11 @@
 #include <vector>
 
 #include "common.hpp"
+#include "muse/mapping.hpp"
 #include "muse/render.hpp"
+#include "musicxml.hpp"
 #include "test_harness.hpp"
+
 
 namespace {
 
@@ -383,4 +386,186 @@ CGMUSIC_TEST(muse_abi_exception_caught_and_formatted_as_json) {
     CGMUSIC_CHECK(json.find("\"message\":") != std::string::npos);
     CGMUSIC_CHECK(json.find("Invalid file name") != std::string::npos);
   }
+}
+
+CGMUSIC_TEST(muse_part_name_mapping_covers_orchestra_and_fallbacks) {
+  const Catalog cat = {
+      {91, "Violins 1", "Vlns. 1", "Muse Strings", "strings"},
+      {92, "Violins 2", "Vlns. 2", "Muse Strings", "strings"},
+      {93, "Violas", "Vlas.", "Muse Strings", "strings"},
+      {94, "Cellos", "Vlcs.", "Muse Strings", "strings"},
+      {95, "Contrabasses", "Cb.", "Muse Strings", "strings"},
+      {108, "French Horn", "Hn", "Muse Brass", "brass"},
+      {110, "Trumpet", "Tpt.", "Muse Brass", "brass"},
+      {118, "Flute 1", "Fl. 1", "Muse Woodwinds", "woodwinds"},
+      {119, "Flute 2", "Fl. 2", "Muse Woodwinds", "woodwinds"},
+      {127, "Clarinet in Bb", "Cl.", "Muse Woodwinds", "woodwinds"},
+      {128, "Bass Clarinet", "B. Clt.", "Muse Woodwinds", "woodwinds"},
+      {133, "Bassoon", "Bsn.", "Muse Woodwinds", "woodwinds"},
+      {167, "Piano", "Pno.", "Muse Keys", "keys"},
+      {178, "Drum Kit", "Kit", "Muse Percussion", "percussion"},
+  };
+
+  // Flute 1 与 Flute 2 (二次出现自动递增)
+  CGMUSIC_CHECK(cgmusic::pick_instrument_by_name("Flute", 73, false, cat, 0) == 118);
+  CGMUSIC_CHECK(cgmusic::pick_instrument_by_name("Flute", 73, false, cat, 1) == 119);
+  // 单簧管与低音单簧管
+  CGMUSIC_CHECK(cgmusic::pick_instrument_by_name("Clarinet", 71, false, cat, 0) == 127);
+  CGMUSIC_CHECK(cgmusic::pick_instrument_by_name("Bass Clarinet", 71, false, cat, 0) == 128);
+  // 大管
+  CGMUSIC_CHECK(cgmusic::pick_instrument_by_name("Bassoon", 70, false, cat, 0) == 133);
+  // 圆号与小号
+  CGMUSIC_CHECK(cgmusic::pick_instrument_by_name("Horn", 60, false, cat, 0) == 108);
+  CGMUSIC_CHECK(cgmusic::pick_instrument_by_name("Trumpet", 56, false, cat, 0) == 110);
+  // 弦乐全套
+  CGMUSIC_CHECK(cgmusic::pick_instrument_by_name("Violins", 48, false, cat, 0) == 91);
+  CGMUSIC_CHECK(cgmusic::pick_instrument_by_name("Violins", 48, false, cat, 1) == 92);
+  CGMUSIC_CHECK(cgmusic::pick_instrument_by_name("Violas", 48, false, cat, 0) == 93);
+  CGMUSIC_CHECK(cgmusic::pick_instrument_by_name("Violoncellos", 48, false, cat, 0) == 94);
+  CGMUSIC_CHECK(cgmusic::pick_instrument_by_name("Contrabasses", 48, false, cat, 0) == 95);
+  CGMUSIC_CHECK(cgmusic::pick_instrument_by_name("Basses", 48, false, cat, 0) == 95);
+  // 打击乐
+  CGMUSIC_CHECK(cgmusic::pick_instrument_by_name("Drum Kit", 0, true, cat, 0) == 178);
+  CGMUSIC_CHECK(cgmusic::pick_instrument_by_name("Percussion", 48, true, cat, 0) == 178);
+  // 钢琴
+  CGMUSIC_CHECK(cgmusic::pick_instrument_by_name("Piano", 0, false, cat, 0) == 167);
+  // 手风琴回退
+  CGMUSIC_CHECK(!cgmusic::pick_instrument_by_name("Accordion", 21, false, cat, 0).has_value());
+}
+
+CGMUSIC_TEST(muse_two_parts_sharing_xml_channel_stay_separate) {
+  const std::string xml =
+      "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+      "<score-partwise version=\"3.1\">\n"
+      "  <part-list>\n"
+      "    <score-part id=\"P1\">\n"
+      "      <part-name>Flute</part-name>\n"
+      "      <midi-instrument id=\"P1-I1\">\n"
+      "        <midi-channel>1</midi-channel>\n"
+      "        <midi-program>74</midi-program>\n"
+      "      </midi-instrument>\n"
+      "    </score-part>\n"
+      "    <score-part id=\"P2\">\n"
+      "      <part-name>Violas</part-name>\n"
+      "      <midi-instrument id=\"P2-I1\">\n"
+      "        <midi-channel>1</midi-channel>\n"
+      "        <midi-program>49</midi-program>\n"
+      "      </midi-instrument>\n"
+      "    </score-part>\n"
+      "  </part-list>\n"
+      "  <part id=\"P1\">\n"
+      "    <measure number=\"1\">\n"
+      "      <attributes><divisions>1</divisions></attributes>\n"
+      "      <note><pitch><step>C</step><octave>5</octave></pitch><duration>1</duration></note>\n"
+      "    </measure>\n"
+      "  </part>\n"
+      "  <part id=\"P2\">\n"
+      "    <measure number=\"1\">\n"
+      "      <attributes><divisions>1</divisions></attributes>\n"
+      "      <note><pitch><step>G</step><octave>3</octave></pitch><duration>1</duration></note>\n"
+      "    </measure>\n"
+      "  </part>\n"
+      "</score-partwise>\n";
+  const std::vector<std::uint8_t> data(xml.begin(), xml.end());
+  const MidiSequence sequence = cgmusic::musicxml_to_sequence(data, "two_parts.xml");
+
+  // 验证两声部保持独立虚拟通道
+  CGMUSIC_CHECK(sequence.channel_names.size() == 2);
+  CGMUSIC_CHECK(sequence.channel_names[0] == "Flute");
+  CGMUSIC_CHECK(sequence.channel_names[1] == "Violas");
+
+  const Catalog cat = {
+      {93, "Violas", "Vlas.", "Muse Strings", "strings"},
+      {118, "Flute 1", "Fl.", "Muse Woodwinds", "woodwinds"},
+  };
+  const auto plans = cgmusic::muse::plan_channels(sequence, RenderOptions{}, cat);
+  CGMUSIC_CHECK(plans.size() == 2);
+  CGMUSIC_CHECK(plans[0].instrument_id == 118);
+  CGMUSIC_CHECK(plans[0].instrument_name == "Flute 1");
+  CGMUSIC_CHECK(plans[1].instrument_id == 93);
+  CGMUSIC_CHECK(plans[1].instrument_name == "Violas");
+
+  // 验证 SMF/MIDI 路径正常产出合规字节流
+  const auto smf = cgmusic::musicxml_to_midi(data, "two_parts.xml");
+  CGMUSIC_CHECK(smf.size() > 14);
+  CGMUSIC_CHECK(smf[0] == 'M' && smf[1] == 'T' && smf[2] == 'h' && smf[3] == 'd');
+}
+
+CGMUSIC_TEST(muse_synthetic_pizzicato_arco_ranges) {
+  const std::string xml =
+      "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+      "<score-partwise version=\"3.1\">\n"
+      "  <part-list>\n"
+      "    <score-part id=\"P1\">\n"
+      "      <part-name>Violins</part-name>\n"
+      "      <midi-instrument id=\"P1-I1\">\n"
+      "        <midi-channel>1</midi-channel>\n"
+      "        <midi-program>41</midi-program>\n"
+      "      </midi-instrument>\n"
+      "    </score-part>\n"
+      "  </part-list>\n"
+      "  <part id=\"P1\">\n"
+      "    <measure number=\"1\">\n"
+      "      <attributes><divisions>1</divisions></attributes>\n"
+      "      <note><pitch><step>C</step><octave>4</octave></pitch><duration>1</duration></note>\n"
+      "    </measure>\n"
+      "    <measure number=\"2\">\n"
+      "      <direction><direction-type><words>pizz.</words></direction-type></direction>\n"
+      "      <note><pitch><step>E</step><octave>4</octave></pitch><duration>1</duration></note>\n"
+      "    </measure>\n"
+      "    <measure number=\"3\">\n"
+      "      <direction><direction-type><words>arco</words></direction-type></direction>\n"
+      "      <note><pitch><step>G</step><octave>4</octave></pitch><duration>1</duration></note>\n"
+      "    </measure>\n"
+      "  </part>\n"
+      "</score-partwise>\n";
+  const std::vector<std::uint8_t> data(xml.begin(), xml.end());
+  const MidiSequence sequence = cgmusic::musicxml_to_sequence(data, "pizz.xml");
+  const Catalog cat = {{91, "Violins 1", "Vlns.", "Muse Strings", "strings"}};
+  const auto plans = cgmusic::muse::plan_channels(sequence, RenderOptions{}, cat);
+
+  CGMUSIC_CHECK(plans.size() == 1);
+  CGMUSIC_CHECK(plans[0].notes.size() == 3);
+  // 音符 1: 缺省 arco
+  CGMUSIC_CHECK(plans[0].notes[0]._articulation == cgmusic::muse::abi::kArticulationNone);
+  // 音符 2: pizz.
+  CGMUSIC_CHECK(plans[0].notes[1]._articulation == cgmusic::muse::abi::kArticulationPizzicato);
+  // 音符 3: arco 恢复
+  CGMUSIC_CHECK(plans[0].notes[2]._articulation == cgmusic::muse::abi::kArticulationNone);
+}
+
+CGMUSIC_TEST(muse_drum_trim_only_applied_to_percussion_stems) {
+  ChannelPlan brass_plan;
+  brass_plan.channel = 0;
+  brass_plan.instrument_id = 110;
+  brass_plan.instrument_name = "Trumpet";
+  brass_plan.family = "brass";
+  brass_plan.notes.resize(1);
+
+  ChannelPlan drum_plan;
+  drum_plan.channel = 1;
+  drum_plan.instrument_id = 178;
+  drum_plan.instrument_name = "Drum Kit";
+  drum_plan.family = "percussion";
+  drum_plan.notes.resize(1);
+
+  cgmusic::muse::DryRender dry;
+  dry.stems.resize(2);
+  for (cgmusic::Audio& stem : dry.stems) {
+    stem.rate = cgmusic::kSampleRate;
+    stem.channels.assign(2, std::vector<float>(cgmusic::kSampleRate, 0.5F));
+  }
+
+  cgmusic::MuseRenderResult result;
+  cgmusic::RenderOptions options;
+  options.reverb.level = 0.0;
+  options.balance = false;  // 关闭自动平衡以便直接检验衰减
+  cgmusic::muse::mix_hybrid(dry, {brass_plan, drum_plan}, {}, {}, options, -14.0, &result);
+
+  CGMUSIC_CHECK(result.tracks.size() == 2);
+  // 验证 RMS 暴露在报告中 (dBFS 应约为 20*log10(0.5) = -6.02 dBFS)
+  CGMUSIC_CHECK(near(result.tracks[0].rms_dbfs, -6.02, 0.1));
+  CGMUSIC_CHECK(near(result.tracks[1].rms_dbfs, -6.02, 0.1));
+  // 混音报告中的增益衰减包含 -12 dB 衰减
+  CGMUSIC_CHECK(result.tracks[1].family == "percussion");
 }

@@ -81,9 +81,10 @@ class TrackReader {
 
 // 读取一条轨道:收集通道消息与速度变化;遇到 End of Track 结束。
 // 支持 running status;sysex 取消 running status,meta 不影响。
+// track_name 被设置为 0x03 元事件(如存在且非空);first_channel 设置为该轨道首次出现的通道。
 void read_track(const std::vector<std::uint8_t>& data, std::size_t begin, std::size_t end,
                 std::vector<RawEvent>& events, std::vector<TempoChange>& tempos,
-                std::uint64_t& end_tick) {
+                std::uint64_t& end_tick, std::string& track_name, int& first_channel) {
   TrackReader reader(data, begin, end);
   std::uint64_t tick = 0;
   std::uint8_t running = 0;
@@ -106,6 +107,10 @@ void read_track(const std::vector<std::uint8_t>& data, std::size_t begin, std::s
         std::uint32_t micros = 0;
         for (int i = 0; i < 3; ++i) micros = (micros << 8) | reader.next();
         tempos.push_back({tick, micros});
+      } else if (type == 0x03 && track_name.empty() && length > 0) {
+        // 轨道名称元事件
+        track_name.resize(length);
+        for (std::uint32_t i = 0; i < length; ++i) track_name[i] = static_cast<char>(reader.next());
       } else {
         reader.skip(length);
       }
@@ -120,6 +125,8 @@ void read_track(const std::vector<std::uint8_t>& data, std::size_t begin, std::s
       running = status;
       has_running = true;
       const std::uint8_t kind = status & 0xF0U;
+      const int channel = status & 0x0F;
+      if (first_channel < 0) first_channel = channel;
       RawEvent event;
       event.tick = tick;
       event.status = status;
@@ -211,15 +218,25 @@ MidiSequence parse_midi(const std::vector<std::uint8_t>& data) {
   std::uint64_t longest_tick = 0;
   std::size_t tracks = 0;
   std::size_t pos = 8 + static_cast<std::size_t>(header_length);
+  // 记录每个 MIDI 通道的名称(首次绑定轨道名的通道)
+  std::vector<std::string> channel_names(16);
+
   while (tracks < declared_tracks && pos + 8 <= data.size()) {
     const std::size_t length = be32(data, pos + 4);
     const std::size_t body = pos + 8;
     if (length > data.size() - body) bad_midi("Truncated MIDI track chunk");
     if (std::memcmp(&data[pos], "MTrk", 4) == 0) {
       std::uint64_t end_tick = 0;
-      read_track(data, body, body + length, raw, tempos, end_tick);
+      std::string track_name;
+      int first_channel = -1;
+      read_track(data, body, body + length, raw, tempos, end_tick, track_name, first_channel);
       longest_tick = std::max(longest_tick, end_tick);
       ++tracks;
+      // 若该轨道有通道消息且有轨道名,且该通道尚无名称,则绑定。
+      if (!track_name.empty() && first_channel >= 0 && first_channel < 16 &&
+          channel_names[static_cast<std::size_t>(first_channel)].empty()) {
+        channel_names[static_cast<std::size_t>(first_channel)] = track_name;
+      }
     }
     pos = body + length;
   }
@@ -232,6 +249,11 @@ MidiSequence parse_midi(const std::vector<std::uint8_t>& data) {
   MidiSequence sequence;
   sequence.duration_s = tempo_map.seconds_at(longest_tick);
   sequence.tempo_map = tempo_map.tempos();
+  sequence.channel_names = std::move(channel_names);
+  sequence.channel_is_drum.assign(16, false);
+  sequence.channel_is_drum[9] = true;
+  sequence.pizzicato_ranges.resize(16);
+
   if (sequence.duration_s > kMaxMidiSeconds) {
     throw Error("too_long", "The score exceeds the 15 minute playback limit");
   }
@@ -243,7 +265,8 @@ MidiSequence parse_midi(const std::vector<std::uint8_t>& data) {
   sequence.events.reserve(raw.size());
   for (const auto& event : raw) {
     sequence.events.push_back(
-        {tempo_map.seconds_at(event.tick), event.status, event.data1, event.data2});
+        {tempo_map.seconds_at(event.tick), event.status, event.data1, event.data2,
+         static_cast<int>(event.status & 0x0F)});
   }
   return sequence;
 }
