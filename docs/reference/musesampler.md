@@ -348,3 +348,26 @@ Windows 上的库与样本都是 Muse Hub 安装结果,不是 MuseScore 自带�
 - 是否允许对 receipt 证书链与库的校验路径做进一步只读分析(不修改 receipt 或库),以定位 -1。
 - 是否由用户在自己已登录的官方 Manager 下生成对照 receipt(仅作比对,不复制进容器)。
 
+
+## 16. 官方 Manager 环境复现与初始化结果调查 [已验证 / 终止]
+
+更新日期:2026-11-13。本节为追加,不修改 §0–§15。遵照用户最新裁定:本项目仅使用 Muse Group 官方公开免费资源,不破解 Muse Sounds,不伪造或篡改收据,不绕过许可证/证书链验证。若仅靠标准运行环境卫生无法使 `ms_init_3` 成功,则终止该路径,不再深入。
+
+### 16.1 已验证
+
+- **环境卫生项与尝试**:
+  - 基础镜像:Debian bookworm。
+  - 系统证书与时钟:安装标准 `ca-certificates` 与 `openssl`,容器内时钟为当前真实时间 2026-11-13(处于证书 2026-03 至 2027-03 有效期内)。
+  - 机器标识:`/etc/machine-id` 与 `/var/lib/dbus/machine-id` 标准配置。
+  - 配置文件:写入 `/var/lib/MuseSampler/.config` 指向样本目录 `/opt/muse-sounds`。
+  - 用户与目录:以 uid 1000(`muse`)运行,挂载官方 Manager 生成的 HOME(`~/.cache/musesampler-pkg/home-run2`),含 `.receipt`、`settings.json`、`~/.local/share/MuseSampler/.config` 等。
+  - 样本与库:样本目录与真实库 `libMuseSamplerCoreLib.so` 均以只读(`:ro`)挂载。
+  - 探针可执行文件名:按前次授权命名为 `mscore-cgmusic-probe`。
+- **观测结果**:
+  - 缺 `/etc/machine-id` 时(如普通容器默认无此文件):`ms_init_3` 返回 `-1`。对应库内部因无法读取机器标识文件而触发状态码 4,映射为 `-1`。
+  - 补齐标准 `/etc/machine-id` 后:`ms_init_3` 成功读取机器标识并越过该检查,但随后返回 `-7`。对应库内部状态码 3,映射为 `-7`。
+  - 原因定位:官方 Manager 在容器内未登录生成该 receipt 时,环境无机器标识,导致生成的 receipt 内部包含的机器身份为空字符串;而 MuseSampler 库在加载 receipt 时强制将 receipt 内记录的身份与本地环境机器标识进行对比匹配。缺少标识返回 `-1`,存在标识因与空值不匹配返回 `-7`。
+- **结论**:
+  - 在仅依靠合法 Linux 环境卫生配置的前提下,当前官方 Manager 生成的 receipt 无法使 `ms_init_3` 返回 0。
+  - 进一步使 `ms_init_3` 返回 0 需要绕过或干预库的许可证/收据校验逻辑,违背"仅借用免费资源、不破解"的原则,因此不再推进。
+  - 按裁定要求,不生成 `sandbox/tools/cgmusic/tools/muse_env.sh`。

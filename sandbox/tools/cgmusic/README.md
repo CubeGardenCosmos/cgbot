@@ -1,10 +1,10 @@
 # cgmusic
 
-原生 C++17 命令行工具:把 MIDI 或 MusicXML(含 .mxl)渲染为音频,经 FluidSynth 合成后按 EBU R128 处理(-14 LUFS,真峰值 ≤ -1.5 dBTP,去首尾静音,末尾淡出),输出 mp3 / wav / flac。
+原生 C++17 命令行工具:把 MIDI 或 MusicXML(含 .mxl)渲染为音频,经 FluidSynth 或 MuseSampler 合成后按 EBU R128 处理(-14 LUFS,真峰值 ≤ -1.5 dBTP,去首尾静音,末尾淡出),输出 mp3 / wav / flac。
 
 ## 构建依赖(Debian bookworm)
 
-`libfluidsynth-dev libebur128-dev libsndfile1-dev libmp3lame-dev`
+`libfluidsynth-dev libebur128-dev libsndfile1-dev libmp3lame-dev libpugixml-dev libzip-dev libsqlite3-dev`
 
 ## 构建与测试
 
@@ -16,13 +16,16 @@ ctest --test-dir build --output-on-failure
 ## 用法
 
 ```
-cgmusic render <file> [--soundfont ID|FILE] [--fmt mp3|wav|flac] [-o OUT] [--gain G] [--reverb CH=0-127]... [--reverb-room 0-1] [--reverb-level 0-1]
+cgmusic render <file> [--engine fluidsynth|muse] [--soundfont ID|FILE] [--fmt mp3|wav|flac] [-o OUT] [--gain G] [--reverb CH=0-127]... [--reverb-room 0-1] [--reverb-level 0-1]
 cgmusic soundfonts
 cgmusic analyze <audio>
 ```
 
 - stdout 输出一行 JSON;错误输出 `{"error":code,"message":...}` 到 stderr,退出码非 0。
 - 音色目录:环境变量 `CGMUSIC_SOUNDFONTS`,默认 `/opt/soundfonts`(只读)。
+- `--engine` 默认 `fluidsynth`;`muse` 使用真实 MuseSampler 库。库路径由 `MUSESAMPLER_LIB` 指定,缺省 `/opt/musesampler/lib/libMuseSamplerCoreLib.so`;样本根由 `MUSE_SAMPLES_DIR` 指定,缺省 `/opt/muse-sounds`(包含 `.instruments`,均只读)。不将库或样本放入仓库/镜像。
+- Muse 按发声 MIDI 通道创建轨道,使用该通道最后一个 GM 程序号、音符时值、速度表 BPM 与力度事件。没有映射乐器、初始化或渲染失败、输出静音时返回 `muse_unavailable`,**不会回退 FluidSynth**。`--soundfont` 与 `--font-for-channel` 仅适用于 FluidSynth。
+- Muse 干声按乐器族进入 `src/mix/` 的自动平衡、混响发送、总线混响与 -14 LUFS / -1.5 dBTP 母带;输出 JSON 的 `muse.tracks` 与 `muse.mix` 给出轨道及混音报告。
 - 默认输出目录 `/workspace/artifacts/music/`。
 - `--gain G`:相对 -14 LUFS 目标的 dB 偏移,限 ±12;真峰值上限仍为 -1.5 dBTP。
 - `--reverb CH=0-127`(可重复):MIDI 通道 1-16 的混响发送(CC91),优先级最高,覆盖文件中的 CC91 与默认表。
@@ -32,12 +35,11 @@ cgmusic analyze <audio>
 - JSON 额外包含 `balance`(各声部偏移与实际增益)与 `reverb`(房间、电平、各通道最终发送量 `reverb_send`/`chorus_send` 及来源 `reverb_source`/`chorus_source`,取值 `cli`、`file`、`table`)。
 - 上限:MIDI 字节 8 MiB,播放时长 15 分钟(超出返回 `too_long`)。长乐谱会占用约为时长 × 44100 × 2 × 4 字节 × 3 的内存。
 
-## 内部模块(尚未接入 CLI)
+## 内部模块
 
-- `src/mix/`:混响总线与混音器(`reverb`、`mixer`)。`main.cpp` 尚未调用。
-- `src/muse/`:MuseSampler 运行库加载器(`loader`,`dlopen` + 版本门)、Muse 目录库读取(`catalog`,SQLite 只读)与声部映射(`mapping`)。
-- 新增构建依赖:`libsqlite3-dev`(运行时 `libsqlite3-0`)。可选探针 `muse_probe` 由 `-DCGMUSIC_BUILD_PROBE=ON` 打开,默认关闭。
-- Muse 引擎渲染(`--engine muse`)**尚未对外暴露**,`render` 目前仅使用 FluidSynth。
+- `src/mix/`:混响总线与混音器(`reverb`、`mixer`),供 Muse 引擎使用。
+- `src/muse/`:MuseSampler 运行库加载器(`loader`,`dlopen` + 版本门)、Muse 目录库读取(`catalog`,SQLite 只读)、声部映射(`mapping`)与离线渲染(`render`)。
+- 可选探针 `muse_probe` 由 `-DCGMUSIC_BUILD_PROBE=ON` 打开,默认关闭。
 
 ## 依赖选择 / 库调研
 

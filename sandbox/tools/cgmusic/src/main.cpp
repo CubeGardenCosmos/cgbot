@@ -51,6 +51,7 @@ std::string font_format(const fs::path& path) {
 
 struct RenderArgs {
   std::optional<std::string> input;
+  std::optional<std::string> engine;
   std::optional<std::string> soundfont;
   std::optional<std::string> fmt;
   std::optional<std::string> output;
@@ -69,7 +70,9 @@ RenderArgs parse_render_args(int argc, char** argv) {
       if (i + 1 >= argc) throw Error("bad_input", "Missing value for " + arg);
       return argv[++i];
     };
-    if (arg == "--soundfont") {
+    if (arg == "--engine") {
+      args.engine = value();
+    } else if (arg == "--soundfont") {
       args.soundfont = value();
     } else if (arg == "--fmt") {
       args.fmt = value();
@@ -95,7 +98,7 @@ RenderArgs parse_render_args(int argc, char** argv) {
   }
   if (!args.input) {
     throw Error("bad_input",
-                "usage: cgmusic render <file> [--soundfont ID|FILE] [--fmt mp3|wav|flac] "
+                "usage: cgmusic render <file> [--engine fluidsynth|muse] [--soundfont ID|FILE] [--fmt mp3|wav|flac] "
                 "[-o OUT] [--gain G] [--reverb CH=0-127]... [--font-for-channel CH=ID]... "
                 "[--reverb-room R] [--reverb-level L]");
   }
@@ -181,6 +184,7 @@ void print_missing(const MissingPreset& miss) {
 int cmd_render(int argc, char** argv) {
   const RenderArgs args = parse_render_args(argc, argv);
   const fs::path input = *args.input;
+  const RenderEngine engine = parse_render_engine(args.engine.value_or("fluidsynth"));
   const AudioFormat format = parse_format(args.fmt.value_or("mp3"));
   const double gain_db = parse_gain(args.gain);
 
@@ -199,16 +203,27 @@ int cmd_render(int argc, char** argv) {
   }
   const MidiSequence sequence = parse_midi(midi);
 
-  const fs::path dir = soundfont_dir();
-  const SoundfontInfo font =
-      args.soundfont ? resolve_soundfont(dir, *args.soundfont) : default_soundfont(dir);
-  options.font_overrides = parse_font_overrides(args, dir);
-
   RenderReport report;
-  Audio audio = render_sequence(sequence, font, options, &report);
+  MuseRenderResult muse_report;
+  std::optional<SoundfontInfo> font;
+  Audio audio;
+  if (engine == RenderEngine::Muse) {
+    if (args.soundfont || !args.font_for_channel.empty()) {
+      throw Error("bad_input", "--soundfont 与 --font-for-channel 仅适用于 fluidsynth 引擎");
+    }
+    audio = render_sequence_muse(sequence, options, kTargetLufs + gain_db, &muse_report);
+  } else {
+    const fs::path dir = soundfont_dir();
+    font = args.soundfont ? resolve_soundfont(dir, *args.soundfont) : default_soundfont(dir);
+    options.font_overrides = parse_font_overrides(args, dir);
+    audio = render_sequence(sequence, *font, options, &report);
+  }
   trim_silence(audio);
   fade_tail(audio, kFadeSeconds);
-  const Quality quality = master(audio, kTargetLufs + gain_db, kCeilingDbtp);
+  // Muse 的混音器已经完成同一目标的响度与真峰值处理;编码与后续报告共用。
+  const Quality quality = engine == RenderEngine::Muse
+                              ? measure(audio)
+                              : master(audio, kTargetLufs + gain_db, kCeilingDbtp);
 
   fs::path output;
   if (args.output) {
@@ -221,9 +236,10 @@ int cmd_render(int argc, char** argv) {
 
   std::cout << "{\"path\":" << json_string(fs::absolute(output).string())
             << ",\"fmt\":" << json_string(format_name(format))
+            << ",\"engine\":" << json_string(render_engine_name(engine))
             << ",\"duration_s\":" << number(quality.duration_s)
             << ",\"midi_seconds\":" << number(sequence.duration_s)
-            << ",\"soundfont\":" << json_string(font.id)
+            << ",\"soundfont\":" << (font ? json_string(font->id) : "null")
             << ",\"lufs\":" << number(quality.lufs)
             << ",\"true_peak_dbtp\":" << number(quality.true_peak_dbtp)
             << ",\"lra\":" << number(quality.lra)
@@ -269,7 +285,22 @@ int cmd_render(int argc, char** argv) {
     if (i != 0) std::cout << ",";
     print_missing(report.fallbacks[i]);
   }
-  std::cout << "]}\n";
+  std::cout << "]";
+  if (engine == RenderEngine::Muse) {
+    std::cout << ",\"muse\":{\"version\":" << json_string(muse_report.version)
+              << ",\"dry_seconds\":" << number(muse_report.dry_seconds) << ",\"tracks\":[";
+    for (std::size_t i = 0; i < muse_report.tracks.size(); ++i) {
+      const MuseTrackReport& track = muse_report.tracks[i];
+      if (i != 0) std::cout << ",";
+      std::cout << "{\"channel\":" << track.channel << ",\"program\":" << track.program
+                << ",\"instrument_id\":" << track.instrument_id
+                << ",\"instrument\":" << json_string(track.instrument)
+                << ",\"family\":" << json_string(track.family)
+                << ",\"notes\":" << track.note_count << "}";
+    }
+    std::cout << "],\"mix\":" << muse_report.mix_report << "}";
+  }
+  std::cout << "}\n";
   return 0;
 }
 

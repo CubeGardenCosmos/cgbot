@@ -33,6 +33,7 @@ add_library(cgmusic_core STATIC
   src/muse/loader.cpp
   src/muse/catalog.cpp
   src/muse/mapping.cpp
+  src/muse/render.cpp
 )
 target_include_directories(cgmusic_core PUBLIC src)
 target_compile_options(cgmusic_core PRIVATE -Wall -Wextra -Wpedantic)

@@ -17,6 +17,17 @@
 #include "sends.hpp"
 
 namespace cgmusic {
+
+RenderEngine parse_render_engine(const std::string& name) {
+  if (name == "fluidsynth") return RenderEngine::FluidSynth;
+  if (name == "muse") return RenderEngine::Muse;
+  throw Error("bad_input", "--engine expects fluidsynth or muse");
+}
+
+const char* render_engine_name(RenderEngine engine) noexcept {
+  return engine == RenderEngine::Muse ? "muse" : "fluidsynth";
+}
+
 namespace {
 
 namespace fs = std::filesystem;

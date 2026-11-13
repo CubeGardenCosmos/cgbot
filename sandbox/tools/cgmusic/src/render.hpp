@@ -14,6 +14,12 @@
 
 namespace cgmusic {
 
+enum class RenderEngine { FluidSynth, Muse };
+
+// 引擎名只接受 fluidsynth / muse;muse 不可用时由调用方报错,不在此回退。
+RenderEngine parse_render_engine(const std::string& name);
+const char* render_engine_name(RenderEngine engine) noexcept;
+
 // 混响的显式覆盖(由调用方指定);未设置的项使用默认发送表与 FluidSynth 默认值。
 struct ReverbOptions {
   // 索引 0-15 对应 MIDI 通道 1-16;取值 0-127(CC91)。
@@ -87,5 +93,28 @@ std::vector<PresetInfo> list_font_presets(const std::filesystem::path& path);
 // 按声部分别合成后按电平偏移求和;report 非空时记录实际使用的声部、发送量与字体信息。
 Audio render_sequence(const MidiSequence& sequence, const SoundfontInfo& primary,
                       const RenderOptions& options, RenderReport* report);
+
+struct MuseTrackReport {
+  int channel;  // 1-16
+  int program;
+  int instrument_id;
+  std::string instrument;
+  std::string family;
+  std::size_t note_count = 0;
+};
+
+struct MuseRenderResult {
+  std::vector<MuseTrackReport> tracks;
+  std::string version;
+  double reverb_room = 0.0;
+  double reverb_level = 0.0;
+  double dry_seconds = 0.0;
+  std::string mix_report;  // 混音器的 JSON 报告;已含最终响度
+};
+
+// 44.1 kHz 立体声,经 Muse 采样器按通道输出干声,再经 src/mix 混音与母带。
+// 任一通道没有可用的 Muse 乐器、库失败或输出静音均报错;不回退 FluidSynth。
+Audio render_sequence_muse(const MidiSequence& sequence, const RenderOptions& options,
+                           double target_lufs, MuseRenderResult* report);
 
 }  // namespace cgmusic

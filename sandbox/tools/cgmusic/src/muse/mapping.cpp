@@ -57,6 +57,7 @@ constexpr Candidate kCandidates[] = {
     {false, 42, 42, "Cello Solo", nullptr},
     {false, 42, 42, "Cellos", nullptr},
     {false, 43, 43, "Contrabasses", nullptr},
+    {false, 44, 45, "Violins 1", nullptr},
     {false, 46, 46, "Harp", "Hp."},
     {false, 47, 47, "Timpani", "Timp."},
     {false, 48, 48, "Violins 1", nullptr},
