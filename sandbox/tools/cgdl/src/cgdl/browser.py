@@ -159,10 +159,26 @@ class BrowserSession:
             ) from exc
         status = response.status if response is not None else None
         self._wait_for_challenge(page, challenge_wait_s)
-        html = page.content()
+        html = self._settled_content(page)
         if status == 404 or is_not_found_page(html):
             raise CgdlError(NOT_FOUND, "page returned 404")
         return status, html
+
+    def _settled_content(self, page: Page, attempts: int = 5) -> str:
+        """读取页面 HTML;挑战通过后的跳转期间会失败,等页面稳定后重试,最终失败按下载失败上报。"""
+        last: Exception | None = None
+        for _ in range(attempts):
+            try:
+                return page.content()
+            except Exception as exc:
+                last = exc
+                try:
+                    page.wait_for_load_state("domcontentloaded", timeout=10_000)
+                except Exception:
+                    time.sleep(0.5)
+        raise CgdlError(
+            DOWNLOAD_FAILED, f"page content unavailable ({type(last).__name__})"
+        ) from last
 
     def page_fetch(self, url: str, headers: dict[str, str]) -> tuple[int, str]:
         page = self._live_page()
