@@ -59,7 +59,7 @@ _WAITING_MODEL_HINT = "该任务在等待用户输入:告诉用户它在等他�
 _SUMMARIZE_HINT = "请用一两句人设口吻向用户简短总结这条结果,不要复述原文,不讲技术细节,不列清单。"
 _FILE_SEGMENTS: dict[FileKind, str] = {
     "image": "image",
-    "audio": "record",
+    "audio": "file",
     "video": "video",
     "file": "file",
 }
@@ -70,10 +70,14 @@ def _clip(text: str, limit: int) -> str:
 
 
 def _file_segment(stored: StoredFile) -> Segment:
+    """音频仅在显式 send_as=voice 时作为语音(record)发出;其余按文件发出并保留文件名。"""
+    if stored.kind == "audio" and stored.send_as == "voice":
+        return Segment("record", {"file": stored.url})
+    segment = _FILE_SEGMENTS[stored.kind]
     data: dict[str, object] = {"file": stored.url}
-    if stored.kind == "file":
+    if segment == "file":
         data["name"] = stored.name
-    return Segment(_FILE_SEGMENTS[stored.kind], data)
+    return Segment(segment, data)
 
 
 def _header(notice: CodingNotice) -> str:

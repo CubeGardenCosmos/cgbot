@@ -145,6 +145,7 @@ NoticeKind = Literal[
 ]
 ReportStatus = Literal["running", "waiting_user_input", "completed", "failed"]
 FileKind = Literal["image", "audio", "video", "file"]
+SendAs = Literal["voice", "file"]  # 仅音频有效:voice=语音消息(record),file=文件
 
 
 @dataclass(frozen=True, slots=True)
@@ -157,6 +158,7 @@ class StoredFile:
     size: int
     kind: FileKind
     url: str  # fetchable by NapCat: <public_base_url>/bridge/files/<token>/<name>
+    send_as: SendAs | None = None  # 仅音频;None 时按文件发出
 
 
 @dataclass(frozen=True, slots=True)

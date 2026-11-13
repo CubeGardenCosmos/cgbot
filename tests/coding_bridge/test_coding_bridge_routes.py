@@ -21,6 +21,7 @@ from cgbot.coding.bridge import BridgeHandle, bridge_routes, sniff_mime
 PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 24
 TEXT = b"hello bridge\n"
 BLOB = bytes([0x00, 0x01, 0x02, 0xFE, 0xFF, 0x10])
+AUDIO = b"ID3\x03\x00\x00\x00\x00\x00\x00" + b"\x00" * 16
 
 
 @dataclass
@@ -132,7 +133,12 @@ async def test_round_trip_renames_by_sniffed_type_and_downloads(tmp_path: Path) 
 
         status, body = await report(
             b,
-            {"message": "done", "status": "completed", "files": [uid], "thread_id": "th-1"},
+            {
+                "message": "done",
+                "status": "completed",
+                "files": [{"upload_id": uid}],
+                "thread_id": "th-1",
+            },
         )
         assert (status, body) == (200, {"ok": True})
         (notice,) = b.notifier.notices
@@ -206,7 +212,7 @@ async def test_upload_belongs_to_its_owner(tmp_path: Path) -> None:
         assert (await complete(b, uid, len(BLOB), user="bob"))[0] == 403
         assert (await put_chunk(b, uid, 0, BLOB))[0] == 200
         assert (await complete(b, uid, len(BLOB)))[0] == 200
-        status, body = await report(b, {"message": "x", "files": [uid]}, user="bob")
+        status, body = await report(b, {"message": "x", "files": [{"upload_id": uid}]}, user="bob")
         assert status == 403
         assert body["error"] == "forbidden"
         assert b.notifier.notices == []
@@ -339,9 +345,17 @@ async def test_report_validation_errors(tmp_path: Path) -> None:
             ({"message": "x" * 8001}, 400, "message_too_long"),
             ({"message": "x", "status": "done"}, 400, "bad_request"),
             ({"message": "x", "thread_id": ""}, 400, "bad_request"),
-            ({"message": "x", "files": [f"id{i}" for i in range(17)]}, 400, "too_many_files"),
-            ({"message": "x", "files": [pending, pending]}, 400, "duplicate_file"),
-            ({"message": "x", "files": [pending]}, 409, "file_not_ready"),
+            (
+                {"message": "x", "files": [{"upload_id": f"id{i}"} for i in range(17)]},
+                400,
+                "too_many_files",
+            ),
+            (
+                {"message": "x", "files": [{"upload_id": pending}, {"upload_id": pending}]},
+                400,
+                "duplicate_file",
+            ),
+            ({"message": "x", "files": [{"upload_id": pending}]}, 409, "file_not_ready"),
         ]
         for payload, status_want, code in cases:
             status, body = await report(b, payload)
@@ -372,13 +386,55 @@ async def test_report_status_defaults_to_running_and_user_is_from_token(tmp_path
         assert notice.files == ()
 
 
+# ---------------------------------------------------------------- send_as
+
+
+async def test_send_as_is_carried_per_audio_file(tmp_path: Path) -> None:
+    async with open_bridge(tmp_path) as b:
+        voice_id, _ = await upload_file(b, "v.mp3", AUDIO)
+        file_id, _ = await upload_file(b, "f.mp3", AUDIO)
+        plain_id, _ = await upload_file(b, "p.mp3", AUDIO)
+        status, _ = await report(
+            b,
+            {
+                "message": "m",
+                "files": [
+                    {"upload_id": voice_id, "send_as": "voice"},
+                    {"upload_id": file_id, "send_as": "file"},
+                    {"upload_id": plain_id},
+                ],
+            },
+        )
+        assert status == 200
+        (notice,) = b.notifier.notices
+        assert [f.kind for f in notice.files] == ["audio", "audio", "audio"]
+        assert [f.send_as for f in notice.files] == ["voice", "file", None]
+
+
+async def test_send_as_rejects_unknown_value_and_non_audio_files(tmp_path: Path) -> None:
+    async with open_bridge(tmp_path) as b:
+        audio_id, _ = await upload_file(b, "a.mp3", AUDIO)
+        png_id, _ = await upload_file(b, "p.png", PNG)
+        text_id, _ = await upload_file(b, "t.txt", TEXT)
+        cases: list[tuple[dict[str, Any], str]] = [
+            ({"upload_id": audio_id, "send_as": "record"}, "send_as must be 'voice' or 'file'"),
+            ({"upload_id": png_id, "send_as": "voice"}, "send_as is valid only for audio files"),
+            ({"upload_id": png_id, "send_as": "file"}, "send_as is valid only for audio files"),
+            ({"upload_id": text_id, "send_as": "file"}, "send_as is valid only for audio files"),
+        ]
+        for entry, message in cases:
+            status, body = await report(b, {"message": "x", "files": [entry]})
+            assert (status, body["error"], body["message"]) == (400, "bad_request", message)
+        assert b.notifier.notices == []
+
+
 # ---------------------------------------------------------------- download
 
 
 async def test_download_supports_range_and_rejects_wrong_name_or_token(tmp_path: Path) -> None:
     async with open_bridge(tmp_path) as b:
         _, body = await upload_file(b, "pic.bin", PNG)
-        status, _ = await report(b, {"message": "m", "files": [body["upload_id"]]})
+        status, _ = await report(b, {"message": "m", "files": [{"upload_id": body["upload_id"]}]})
         assert status == 200
         stored = b.notifier.notices[0].files[0]
         path = _path(stored.url)
@@ -417,7 +473,7 @@ async def test_completed_file_expires_and_bytes_are_removed(tmp_path: Path) -> N
     clock = FakeClock(1000.0)
     async with open_bridge(tmp_path, clock=clock, file_ttl_seconds=100.0) as b:
         uid, _ = await upload_file(b, "pic.png", PNG)
-        await report(b, {"message": "m", "files": [uid]})
+        await report(b, {"message": "m", "files": [{"upload_id": uid}]})
         stored = b.notifier.notices[0].files[0]
         assert stored.path.exists()
         clock.now = 1099.0

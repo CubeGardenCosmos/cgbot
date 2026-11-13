@@ -117,7 +117,7 @@ cgdl musescore-get <url> --kind mid|mxl|mp3|pdf [-o DIR]
 1. **一次请求只渲染一次。** 用最合适的音色渲染并交付。不要为了调响度或"试试其他音色"而循环重渲染,除非用户明确要求改动。
 2. **渲染失败最多重试一次,且只在错误信息指向明确的修复方法时**(例如音色 id 写错)。否则直接报告失败。
 3. **声部电平自动,不能修改。** 可以调整混响(`--reverb`、`--reverb-room`、`--reverb-level`),也可以用 `--gain` 改响度,但只在用户要求时使用。
-4. **交付:** 用 `report_progress` 并设置 `files=["/workspace/artifacts/music/<文件>"]`。文件必须位于 `/workspace` 之下。
+4. **交付:** 用 `report_progress`,并设置 `files=[{"path": "/workspace/artifacts/music/<文件>", "send_as": "file"}]`。文件必须位于 `/workspace` 之下。`send_as` 只对音频有效:`"file"` 以文件发送(可保存),`"voice"` 以语音消息播放(有损且有时长上限)。用户要听语音消息选 `"voice"`,要拿到文件选 `"file"`;不明确时用一句话问用户后再发送。
 5. **报告要简短:** 时长(`duration_s`)、综合响度(`lufs`,目标为 -14 LUFS)、真峰值(`true_peak_dbtp`)与是否削波(`clipped`)。例如:"时长 2:31,响度 -14.0 LUFS,真峰值 -1.6 dBTP,未削波"。不要粘贴整段 JSON,也不要解释指标含义。
 6. 若 `clipped` 为 true,在报告中说明。只有用户想要时才提供更低 `--gain` 的渲染,不要自行重渲染。
 7. 若 `fonts` 中出现非空 `missing_presets`,或 `fallbacks` 非空,在报告中用一句话说明。

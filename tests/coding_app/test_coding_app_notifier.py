@@ -9,7 +9,7 @@ from typing import cast
 
 import pytest
 
-from cgbot.coding.contracts import CodingNotice, NoticeKind, ReportStatus, StoredFile
+from cgbot.coding.contracts import CodingNotice, NoticeKind, ReportStatus, SendAs, StoredFile
 from cgbot.coding.notifier import SESSION_EVENT, QqNotifier, fallback_text
 from cgbot.model import OutboundMessage, SendResult
 from cgbot.session import AsyncSessionStore
@@ -27,7 +27,7 @@ def _notice(**overrides: object) -> CodingNotice:
     return CodingNotice(**fields)  # type: ignore[arg-type]
 
 
-def _stored(kind: str, name: str = "a.bin") -> StoredFile:
+def _stored(kind: str, name: str = "a.bin", send_as: SendAs | None = None) -> StoredFile:
     return StoredFile(
         path=Path("/tmp/a.bin"),
         name=name,
@@ -35,6 +35,7 @@ def _stored(kind: str, name: str = "a.bin") -> StoredFile:
         size=3,
         kind=kind,  # type: ignore[arg-type]
         url=f"https://pub.example/bridge/files/tok/{name}",
+        send_as=send_as,
     )
 
 
@@ -161,7 +162,11 @@ async def test_notice_with_files_sends_only_attachment_segments_then_records_and
     assert len(sender.messages) == 1
     message = sender.messages[0]
     assert (message.scope, message.target_id) == ("private", "1001")
-    assert [seg.type for seg in message.segments] == ["image", "record", "video", "file"]
+    assert [seg.type for seg in message.segments] == ["image", "file", "video", "file"]
+    assert message.segments[1].data == {
+        "file": "https://pub.example/bridge/files/tok/v.silk",
+        "name": "v.silk",
+    }
     assert message.segments[0].data == {"file": "https://pub.example/bridge/files/tok/p.png"}
     assert message.segments[3].data == {
         "file": "https://pub.example/bridge/files/tok/report.pdf",
@@ -173,6 +178,41 @@ async def test_notice_with_files_sends_only_attachment_segments_then_records_and
     assert len(items) == 1
     assert items[0].payload["files"] == 4
     assert items[0].payload["files_delivered"] is True
+
+
+@pytest.mark.parametrize(
+    ("kind", "send_as", "segment", "named"),
+    [
+        ("audio", "voice", "record", False),
+        ("audio", "file", "file", True),
+        ("audio", None, "file", True),
+        ("image", None, "image", False),
+        ("video", None, "video", False),
+        ("file", None, "file", True),
+        # send_as is bridge-validated; the notifier still never emits record for non-audio.
+        ("image", "voice", "image", False),
+        ("file", "voice", "file", True),
+    ],
+)
+async def test_file_segment_mapping_by_kind_and_send_as(
+    store: AsyncSessionStore,
+    kind: str,
+    send_as: SendAs | None,
+    segment: str,
+    named: bool,
+) -> None:
+    sender = RecordingSender()
+    notifier = QqNotifier(sender, store, RecordingTrigger())
+
+    await notifier.notify(_notice(files=(_stored(kind, "clip.mp3", send_as=send_as),)))
+
+    (message,) = sender.messages
+    (seg,) = message.segments
+    assert seg.type == segment
+    expected: dict[str, object] = {"file": "https://pub.example/bridge/files/tok/clip.mp3"}
+    if named:
+        expected["name"] = "clip.mp3"
+    assert seg.data == expected
 
 
 async def test_file_send_not_ok_is_recorded_undelivered_and_still_triggers(

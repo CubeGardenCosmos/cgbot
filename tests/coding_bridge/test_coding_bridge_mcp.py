@@ -405,6 +405,9 @@ async def test_tools_list_names_and_schemas(harness: Harness) -> None:
     ]
     assert report["properties"]["status"]["default"] == "running"
     assert report["properties"]["files"]["maxItems"] == 16
+    entry = report["properties"]["files"]["items"]
+    assert entry["required"] == ["path"]
+    assert entry["properties"]["send_as"]["enum"] == ["voice", "file"]
     assert tools["send_file"]["inputSchema"]["required"] == ["path"]
     image = tools["generate_image"]["inputSchema"]
     assert image["required"] == ["prompt"]
@@ -471,7 +474,7 @@ async def test_report_progress_streams_multi_chunk_file(harness: Harness) -> Non
     proc = await spawn(harness)
     response = await proc.tool(
         "report_progress",
-        {"message": "hello", "status": "running", "files": [str(path)]},
+        {"message": "hello", "status": "running", "files": [{"path": str(path)}]},
         meta={"threadId": "thr-1"},
     )
     assert not is_error(response), text_of(response)
@@ -491,6 +494,65 @@ async def test_report_progress_streams_multi_chunk_file(harness: Harness) -> Non
     stdout, stderr = await proc.close()
     assert harness.token not in stderr
     assert harness.token.encode() not in stdout
+
+
+@pytest.mark.parametrize(
+    ("name", "header", "extra", "want"),
+    [
+        ("song.mp3", b"ID3\x03\x00\x00\x00\x00\x00\x00", {"send_as": "voice"}, "voice"),
+        ("song.mp3", b"ID3\x03\x00\x00\x00\x00\x00\x00", {"send_as": "file"}, "file"),
+        ("song.mp3", b"ID3\x03\x00\x00\x00\x00\x00\x00", {}, None),
+        ("song.wav", b"RIFF\x24\x00\x00\x00WAVE", {"send_as": "voice"}, "voice"),
+        ("song.wav", b"RIFF\x24\x00\x00\x00WAVE", {"send_as": "file"}, "file"),
+        ("song.wav", b"RIFF\x24\x00\x00\x00WAVE", {}, None),
+    ],
+)
+async def test_send_as_is_forwarded_to_the_stored_audio(
+    harness: Harness, name: str, header: bytes, extra: dict[str, str], want: str | None
+) -> None:
+    path = harness.root / name
+    path.write_bytes(header + payload_bytes(64))
+    proc = await spawn(harness)
+    response = await proc.tool(
+        "report_progress", {"message": "song", "files": [{"path": str(path), **extra}]}
+    )
+    assert not is_error(response), text_of(response)
+    (notice,) = harness.notifier.notices
+    (stored,) = notice.files
+    assert (stored.kind, stored.send_as) == ("audio", want)
+    await proc.close()
+
+
+@pytest.mark.parametrize(
+    ("name", "header", "send_as", "message"),
+    [
+        (
+            "pic.png",
+            b"\x89PNG\r\n\x1a\n",
+            "voice",
+            "send_as is valid only for audio files",
+        ),
+        (
+            "song.mp3",
+            b"ID3\x03\x00\x00\x00\x00\x00\x00",
+            "record",
+            "send_as must be 'voice' or 'file'",
+        ),
+    ],
+)
+async def test_send_as_invalid_is_rejected_naming_only_the_argument(
+    harness: Harness, name: str, header: bytes, send_as: str, message: str
+) -> None:
+    path = harness.root / name
+    path.write_bytes(header + payload_bytes(32))
+    proc = await spawn(harness)
+    response = await proc.tool(
+        "report_progress", {"message": "m", "files": [{"path": str(path), "send_as": send_as}]}
+    )
+    assert is_error(response)
+    assert text_of(response) == f"(bad_request) {message}"
+    assert harness.notifier.notices == []
+    await proc.close()
 
 
 @pytest.mark.parametrize("key", ["threadId", "thread_id"])
@@ -610,7 +672,9 @@ async def test_oversize_file_refused_before_any_network_call(harness: Harness) -
     with path.open("wb") as handle:
         handle.truncate(MAX_BYTES + 1)
     proc = await spawn(harness)
-    response = await proc.tool("report_progress", {"message": "big", "files": [str(path)]})
+    response = await proc.tool(
+        "report_progress", {"message": "big", "files": [{"path": str(path)}]}
+    )
     assert is_error(response)
     assert text_of(response) == f"(too_large) file is {MAX_BYTES + 1} bytes; limit is {MAX_BYTES}"
     assert harness.requests == []
@@ -670,10 +734,13 @@ async def test_report_validation_errors_come_before_network(harness: Harness) ->
         ({"message": "ok", "status": "done"}, "(invalid_argument) status must be one of"),
         ({"message": "ok", "files": "ok.txt"}, "(invalid_argument) files must be an array"),
         (
-            {"message": "ok", "files": [str(valid)] * 17},
+            {"message": "ok", "files": [{"path": str(valid)}] * 17},
             "(invalid_argument) files allows at most 16 items",
         ),
-        ({"message": "ok", "files": [str(valid), str(outside)]}, "(forbidden_path) "),
+        (
+            {"message": "ok", "files": [{"path": str(valid)}, {"path": str(outside)}]},
+            "(forbidden_path) ",
+        ),
     ]
     proc = await spawn(harness)
     for arguments, expected in cases:

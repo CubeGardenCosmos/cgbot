@@ -319,13 +319,13 @@ def _post_report(
     client: BridgeClient,
     message: str,
     status: str,
-    uploads: list[dict[str, Any]],
+    files: list[dict[str, Any]],
     thread_id: str | None,
 ) -> None:
     payload: dict[str, Any] = {
         "message": message,
         "status": status,
-        "files": [upload["upload_id"] for upload in uploads],
+        "files": files,
     }
     if thread_id is not None:
         payload["thread_id"] = thread_id
@@ -361,22 +361,35 @@ def _list_arg(args: dict[str, Any], key: str, limit: int) -> list[object]:
     return value
 
 
+def _file_refs(items: list[object]) -> list[tuple[SandboxFile, dict[str, object]]]:
+    """Each ``files`` item is {path, send_as?}; send_as is forwarded for the bridge to judge."""
+    refs: list[tuple[SandboxFile, dict[str, object]]] = []
+    for item in items:
+        if not isinstance(item, dict):
+            raise ToolError("invalid_argument", "files items must be objects with a path")
+        entry: dict[str, Any] = item
+        extra: dict[str, object] = {"send_as": entry["send_as"]} if "send_as" in entry else {}
+        refs.append((check_file(entry.get("path")), extra))
+    return refs
+
+
 def _report_progress(client: BridgeClient, args: dict[str, Any], thread_id: str | None) -> str:
     message = _str_arg(args, "message", required=True, max_chars=MAX_MESSAGE_CHARS)
     status = _str_arg(args, "status") or "running"
     if status not in STATUSES:
         raise ToolError("invalid_argument", f"status must be one of {', '.join(STATUSES)}")
-    targets = [check_file(path) for path in _list_arg(args, "files", MAX_FILES)]
-    uploads = [upload_file(client, target) for target in targets]
-    _post_report(client, message, status, uploads, thread_id)
-    return f"reported: status={status} files={len(uploads)}"
+    files: list[dict[str, Any]] = []
+    for target, extra in _file_refs(_list_arg(args, "files", MAX_FILES)):
+        files.append({"upload_id": upload_file(client, target)["upload_id"], **extra})
+    _post_report(client, message, status, files, thread_id)
+    return f"reported: status={status} files={len(files)}"
 
 
 def _send_file(client: BridgeClient, args: dict[str, Any], thread_id: str | None) -> str:
     target = check_file(args.get("path"))
     caption = _str_arg(args, "caption", max_chars=MAX_MESSAGE_CHARS)
     uploaded = upload_file(client, target)
-    _post_report(client, caption, "running", [uploaded], thread_id)
+    _post_report(client, caption, "running", [{"upload_id": uploaded["upload_id"]}], thread_id)
     return f"sent: {uploaded['name']} ({uploaded['kind']}, {uploaded['size']} bytes)"
 
 
@@ -444,7 +457,7 @@ TOOLS: dict[str, Tool] = {
     for tool in (
         Tool(
             "report_progress",
-            "Send a progress message to the user, optionally with files (absolute paths).",
+            "Send a progress message to the user, optionally with files: {path, send_as?} objects.",
             {
                 "type": "object",
                 "properties": {
@@ -461,9 +474,29 @@ TOOLS: dict[str, Tool] = {
                     },
                     "files": {
                         "type": "array",
-                        "items": {"type": "string"},
                         "maxItems": MAX_FILES,
-                        "description": "Absolute paths of files to attach.",
+                        "description": "Files to attach, each an object: {path, send_as?}.",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "path": {
+                                    "type": "string",
+                                    "description": "Absolute path under /workspace or /home/agent.",
+                                },
+                                "send_as": {
+                                    "type": "string",
+                                    "enum": ["voice", "file"],
+                                    "description": (
+                                        "AUDIO ONLY (judged by content, not extension). 'voice' "
+                                        "plays it as a QQ voice message: short speech-like clips "
+                                        "only, lossy and length-capped. 'file' sends the file "
+                                        "itself. Omit to send audio as a file. Any send_as on a "
+                                        "non-audio file is rejected."
+                                    ),
+                                },
+                            },
+                            "required": ["path"],
+                        },
                     },
                 },
                 "required": ["message"],

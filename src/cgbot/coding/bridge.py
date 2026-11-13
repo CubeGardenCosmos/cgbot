@@ -6,8 +6,9 @@ Routes (everything except ``files`` needs ``Authorization: Bearer <sandbox token
 * ``PUT /bridge/uploads/{upload_id}/chunks/{index}`` -- raw chunk, sequential 0-based indices
 * ``POST /bridge/uploads/{upload_id}/complete`` -- verify, sniff type ->
   ``{name, mime, size, kind}``
-* ``POST /bridge/report`` -- ``{message, status?, files?, thread_id?}`` -> ``CodingNotice`` (kind
-  ``report``); the user id always comes from the bearer token
+* ``POST /bridge/report`` -- ``{message, status?, files?: [{upload_id, send_as?}],
+  thread_id?}`` -> ``CodingNotice`` (kind ``report``); the user id always comes from the
+  bearer token
 * ``GET /bridge/files/{token}/{name}`` -- unauthenticated, token-scoped download (NapCat fetches)
 
 Bytes live under ``bridge.temp_dir``. A partial upload expires ``file_ttl_seconds`` after its last
@@ -33,7 +34,7 @@ import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import cast, get_args
+from typing import Any, cast, get_args
 
 from aiohttp import web
 
@@ -44,6 +45,7 @@ from cgbot.coding.contracts import (
     FileKind,
     ReportStatus,
     SandboxAuth,
+    SendAs,
     StoredFile,
 )
 
@@ -59,6 +61,7 @@ READ_BLOCK = 64 * 1024
 SNIFF_BYTES = 4096
 _PARTIAL = ".partial"
 _STATUSES: tuple[str, ...] = get_args(ReportStatus)
+_SEND_AS: tuple[str, ...] = get_args(SendAs)
 _USER_DIR_RE = re.compile(r"[A-Za-z0-9_.-]{1,64}")
 _UNSAFE_NAME_RE = re.compile(r"[^A-Za-z0-9._-]+")
 _SHA_RE = re.compile(r"[0-9a-fA-F]{64}")
@@ -427,7 +430,7 @@ class BridgeHandle:
         up.next_index = index
         up.closed = False
 
-    def _stored(self, up: _Upload) -> StoredFile:
+    def _stored(self, up: _Upload, send_as: SendAs | None = None) -> StoredFile:
         if up.path is None or up.token is None:
             raise _BridgeError(409, "file_not_ready", "upload is not completed")
         return StoredFile(
@@ -437,6 +440,7 @@ class BridgeHandle:
             size=up.declared_size,
             kind=up.kind,
             url=f"{self._public}/bridge/files/{up.token}/{up.name}",
+            send_as=send_as,
         )
 
     async def _stream_chunk(self, request: web.Request, up: _Upload, offset: int) -> int:
@@ -562,6 +566,17 @@ class BridgeHandle:
                 await self._finish(up, size, sha256)
             return web.json_response(self._complete_payload(up))
 
+    def _report_file(self, entry: dict[str, Any], user: str) -> StoredFile:
+        """One report ``files`` entry; ``send_as`` is valid for audio files only."""
+        up = self._lookup(entry["upload_id"], user)
+        if "send_as" not in entry:
+            return self._stored(up)
+        if up.kind != "audio":
+            raise _BridgeError(400, "bad_request", "send_as is valid only for audio files")
+        if entry["send_as"] not in _SEND_AS:
+            raise _BridgeError(400, "bad_request", "send_as must be 'voice' or 'file'")
+        return self._stored(up, cast(SendAs, entry["send_as"]))
+
     @_guarded
     async def _report(self, request: web.Request) -> web.StreamResponse:
         user = self._user(request)
@@ -579,14 +594,17 @@ class BridgeHandle:
             not isinstance(thread_id, str) or not thread_id or len(thread_id) > THREAD_ID_MAX_CHARS
         ):
             raise _BridgeError(400, "bad_request", "thread_id must be a non-empty string")
-        file_ids = body.get("files", [])
-        if not isinstance(file_ids, list) or not all(isinstance(f, str) for f in file_ids):
-            raise _BridgeError(400, "bad_request", "files must be a list of upload ids")
-        if len(file_ids) > REPORT_MAX_FILES:
+        entries = body.get("files", [])
+        if not isinstance(entries, list) or not all(isinstance(e, dict) for e in entries):
+            raise _BridgeError(400, "bad_request", "files must be a list of objects with upload_id")
+        if len(entries) > REPORT_MAX_FILES:
             raise _BridgeError(400, "too_many_files", f"at most {REPORT_MAX_FILES} files")
+        file_ids = [e.get("upload_id") for e in entries]
+        if not all(isinstance(fid, str) for fid in file_ids):
+            raise _BridgeError(400, "bad_request", "files[].upload_id must be a string")
         if len(set(file_ids)) != len(file_ids):
             raise _BridgeError(400, "duplicate_file", "files must be unique")
-        files = tuple(self._stored(self._lookup(fid, user)) for fid in file_ids)
+        files = tuple(self._report_file(entry, user) for entry in entries)
         notice = CodingNotice(
             kind="report",
             user_id=user,
