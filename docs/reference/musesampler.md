@@ -371,3 +371,29 @@ Windows 上的库与样本都是 Muse Hub 安装结果,不是 MuseScore 自带�
   - 在仅依靠合法 Linux 环境卫生配置的前提下,当前官方 Manager 生成的 receipt 无法使 `ms_init_3` 返回 0。
   - 进一步使 `ms_init_3` 返回 0 需要绕过或干预库的许可证/收据校验逻辑,违背"仅借用免费资源、不破解"的原则,因此不再推进。
   - 按裁定要求,不生成 `sandbox/tools/cgmusic/tools/muse_env.sh`。
+
+## 17. 挂载固定 machine-id 重新生成 receipt 与渲染验证 [已验证 / 终止]
+
+更新日期:2026-11-13。本节为追加,不修改 §0–§16。遵照用户最新指令:在容器内配置固定 machine-id 后,由官方 Muse Sounds Manager 在未登录状态下重新生成 receipt,并再次执行探针与渲染验证。
+
+### 17.1 执行过程
+1. **固定 machine-id**:
+   - 生成 32 位十六进制 machine-id 并保存于 `~/.cache/musesampler-pkg/machine-id`(`db0e3c573ce54d25a87bd50fd281b078`)。
+   - 备份旧 `home-run2` 至 `~/.cache/musesampler-pkg/home-run2.bak`。
+2. **官方 Manager 重新生成收据**:
+   - 使用预构建 Debian bookworm 镜像(`muse-manager:bookworm`,含 Xvfb、xdotool、mitmproxy 及 Manager 依赖),同时挂载 `/etc/machine-id` 与 `/var/lib/dbus/machine-id` 到固定标识文件。
+   - 启动官方 Muse Sounds Manager 2.2.1.953(未登录、无凭据),点击首个免费乐器库 Download。
+   - Manager 成功读取机器标识,GraphQL 请求中的 `system_id` 正常包含该标识(前次无 machine-id 时报 `Variable "$input" got invalid value null at "input[0].system_id"` 的错误完全消除)。
+   - Manager 生成新收据 `~/.local/share/muse-sounds-manager/.receipt`(2898 字节,前次空标识版本为 2842 字节)。
+3. **探针验证 (`mscore-cgmusic-probe`)**:
+   - 在相同 machine-id 挂载及 uid 1000 环境下运行探针 `mscore-cgmusic-probe`。
+   - **`ms_init_3` 返回 `0` (`kResultOk`)**:探针输出 `init ok (sample root /opt/muse-sounds)`,验证了机器标识与收据匹配后初始化检查完全通过。
+4. **乐器加载与离线渲染结果**:
+   - 初始化成功后,MuseSampler 库遍历样本目录(`MUSE_SAMPLES_DIR=/opt/muse-sounds`),日志显示所有乐器包均被跳过:`receipt rejected instrument <id> in package '<pkg>'... receipt-rejected instruments were skipped`。
+   - 导致库内部导出的可用乐器列表为空(`instruments=0`)。
+   - 执行 `cgmusic render parasailing.mid --engine muse`(可执行文件名需符合 `mscore-*` 宿主前缀检查),离线渲染因无任何可用乐器而输出全静音(`{"error":"muse_unavailable","message":"MuseSampler 输出全静音"}`)。
+
+### 17.2 结论与终止
+- **机器标识与初始化闭环**:在官方 Manager 生成收据的环境与运行环境均挂载相同合法 `/etc/machine-id` 的前提下,`ms_init_3` 能够成功返回 `0`。
+- **阻断原因**:在官方 Manager 未登录状态下,生成的收据仅包含 MuseSampler 核心组件的授权记录,未包含乐器音色包(即使是免费音色包)的授权证书/收据凭证。因此真实库在离线渲染时判定所有样本包未经收据许可,全部予以拒绝(rejected),无法产出声音。
+- **裁定遵守**:根据"不破解、不反编译、不伪造收据、不输入凭据"的用户裁定,不再继续尝试获取或篡改乐器包收据,本项技术验证正式终止。
