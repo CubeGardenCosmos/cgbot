@@ -14,7 +14,14 @@ from cgmaster.errors import CgmasterError
 from cgscore.prepare import prepare as prepare_score
 
 from cgmusic import synth
-from cgmusic.errors import BAD_INPUT, TOO_LONG, UNSUPPORTED, WRITE_FAILED, CgmusicError
+from cgmusic.errors import (
+    BAD_INPUT,
+    MUSE_UNAVAILABLE,
+    TOO_LONG,
+    UNSUPPORTED,
+    WRITE_FAILED,
+    CgmusicError,
+)
 from cgmusic.options import RenderOptions
 from cgmusic.plan import PartTask, read_plan, resolve_parts, save_plan
 
@@ -52,10 +59,18 @@ def render(opts: RenderOptions) -> dict[str, Any]:
             synth.RenderCall(
                 key=task.id,
                 argv=_render_argv(binary, plan_dir / task.file, task, stems / f"{task.id}.wav"),
+                fallback_argv=_fallback_argv(
+                    binary, plan_dir / task.file, task, stems / f"{task.id}.wav", opts
+                )
+                if task.engine == "muse"
+                else None,
             )
             for task in tasks
         ]
         results = synth.render_all(calls, worker_count(opts, tasks))
+        muse_tasks = [task for task in tasks if task.engine == "muse"]
+        if muse_tasks and not any(results[task.id].fallback_reason is None for task in muse_tasks):
+            raise CgmusicError(MUSE_UNAVAILABLE, "所有 Muse 声部均不可用并已回退 FluidSynth")
         mix = _mix(plan_path, stems, output, opts)
     return _report(mix, tasks, results, time.monotonic() - started)
 
@@ -145,6 +160,16 @@ def _render_argv(binary: str, mid: Path, task: PartTask, stem: Path) -> list[str
     return argv
 
 
+def _fallback_argv(
+    binary: str, mid: Path, task: PartTask, stem: Path, opts: RenderOptions
+) -> list[str]:
+    argv = [binary, "render", str(mid), "--engine", "fluidsynth"]
+    if opts.soundfont is not None:
+        argv += ["--soundfont", opts.soundfont]
+    argv += ["-o", str(stem)]
+    return argv
+
+
 def _mix(plan_path: Path, stems: Path, output: Path, opts: RenderOptions) -> dict[str, Any]:
     try:
         return master(
@@ -196,6 +221,15 @@ def _report(
             )
         missing.extend({**m, "part": task.id} for m in rep.get("missing_presets", []))
         fallbacks.extend({**m, "part": task.id} for m in rep.get("fallbacks", []))
+        if result.fallback_reason is not None:
+            fallbacks.append(
+                {
+                    "channel": task.source_channel or (task.channels[0] if task.channels else 0),
+                    "part": task.id,
+                    "program": task.program,
+                    "reason": result.fallback_reason,
+                }
+            )
         muse = rep.get("muse")
         if isinstance(muse, dict):
             has_muse = True

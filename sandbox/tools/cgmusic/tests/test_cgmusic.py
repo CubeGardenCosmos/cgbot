@@ -252,3 +252,80 @@ def test_help_is_unsupported(capsys):
 def test_no_arguments_is_bad_input(capsys):
     code, _, err = run_cli([], capsys)
     assert code == 1 and err["error"] == "bad_input"
+
+
+def test_muse_partial_fallback_rerenders_with_fluidsynth(
+    tmp_path, tmp_base, fake_cgsynth, monkeypatch, capsys
+):
+    mid = write_midi(tmp_path / "duo.mid", channels=(0, 1))
+    ids = _ids(mid, tmp_path / "scratch")
+    monkeypatch.setenv("FAKE_CGSYNTH_FAIL", ids[0])
+    monkeypatch.setenv("FAKE_CGSYNTH_FAIL_ENGINE", "muse")
+    monkeypatch.setenv("FAKE_CGSYNTH_FAIL_CODE", "muse_unavailable")
+    code, report, err = run_cli(
+        ["render", str(mid), "--engine", "muse", "--fmt", "wav", "-o", str(tmp_path / "o.wav")],
+        capsys,
+    )
+    assert code == 0, err
+    assert Path(report["path"]).is_file()
+    fallback_parts = [fb["part"] for fb in report["fallbacks"]]
+    assert ids[0] in fallback_parts
+    fb_entry = next(fb for fb in report["fallbacks"] if fb["part"] == ids[0])
+    assert fb_entry["reason"] == "muse_unavailable"
+    assert fb_entry["channel"] == 1
+    part_engines = {p["id"]: p["engine"] for p in report["parts"]}
+    assert part_engines[ids[0]] == "fluidsynth"
+    assert part_engines[ids[1]] == "muse"
+    assert report["muse"] is not None
+    assert [t["part"] for t in report["muse"]["tracks"]] == [ids[1]]
+    assert len(report["fonts"]) == 1
+    assert report["fonts"][0]["parts"] == [ids[0]]
+
+
+def test_muse_silent_fallback_records_muse_silent_reason(
+    tmp_path, tmp_base, fake_cgsynth, monkeypatch, capsys
+):
+    mid = write_midi(tmp_path / "duo.mid", channels=(0, 1))
+    ids = _ids(mid, tmp_path / "scratch")
+    monkeypatch.setenv("FAKE_CGSYNTH_FAIL", ids[0])
+    monkeypatch.setenv("FAKE_CGSYNTH_FAIL_ENGINE", "muse")
+    monkeypatch.setenv("FAKE_CGSYNTH_FAIL_CODE", "muse_unavailable")
+    monkeypatch.setenv("FAKE_CGSYNTH_FAIL_MSG", "MuseSampler 输出全静音")
+    code, report, err = run_cli(
+        ["render", str(mid), "--engine", "muse", "--fmt", "wav", "-o", str(tmp_path / "o.wav")],
+        capsys,
+    )
+    assert code == 0, err
+    fb_entry = next(fb for fb in report["fallbacks"] if fb["part"] == ids[0])
+    assert fb_entry["reason"] == "muse_silent"
+
+
+def test_muse_all_parts_fallback_fails_with_muse_unavailable(
+    tmp_path, tmp_base, fake_cgsynth, monkeypatch, capsys
+):
+    mid = write_midi(tmp_path / "duo.mid", channels=(0, 1))
+    monkeypatch.setenv("FAKE_CGSYNTH_FAIL", "ALL")
+    monkeypatch.setenv("FAKE_CGSYNTH_FAIL_ENGINE", "muse")
+    monkeypatch.setenv("FAKE_CGSYNTH_FAIL_CODE", "muse_unavailable")
+    code, report, err = run_cli(
+        ["render", str(mid), "--engine", "muse", "--fmt", "wav", "-o", str(tmp_path / "o.wav")],
+        capsys,
+    )
+    assert code == 1 and report is None
+    assert err["error"] == "muse_unavailable"
+
+
+def test_non_muse_error_does_not_fallback(tmp_path, tmp_base, fake_cgsynth, monkeypatch, capsys):
+    mid = write_midi(tmp_path / "duo.mid", channels=(0, 1))
+    ids = _ids(mid, tmp_path / "scratch")
+    monkeypatch.setenv("FAKE_CGSYNTH_FAIL", ids[0])
+    monkeypatch.setenv("FAKE_CGSYNTH_FAIL_ENGINE", "muse")
+    monkeypatch.setenv("FAKE_CGSYNTH_FAIL_CODE", "synth_failed")
+    code, report, err = run_cli(
+        ["render", str(mid), "--engine", "muse", "--fmt", "wav", "-o", str(tmp_path / "o.wav")],
+        capsys,
+    )
+    assert code == 1 and report is None
+    assert err["error"] == "synth_failed"
+    fluid_calls = [c for c in fake_cgsynth.calls() if c["engine"] == "fluidsynth"]
+    assert fluid_calls == []

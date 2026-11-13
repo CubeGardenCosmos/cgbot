@@ -60,10 +60,15 @@ def render(args: list[str]) -> int:
     part = out.stem
     resolved = None if engine == "muse" else (soundfont or "GM")
     log("start", part=part, engine=engine, soundfont=resolved, argv=args)
-    if os.environ.get("FAKE_CGSYNTH_FAIL") == part:
-        log("fail", part=part)
+    raw_targets = os.environ.get("FAKE_CGSYNTH_FAIL", "")
+    fail_targets = [p.strip() for p in raw_targets.split(",") if p.strip()]
+    fail_engine = os.environ.get("FAKE_CGSYNTH_FAIL_ENGINE")
+    target_match = "ALL" in fail_targets or part in fail_targets
+    if target_match and (fail_engine is None or fail_engine == engine):
+        log("fail", part=part, engine=engine)
         code = os.environ.get("FAKE_CGSYNTH_FAIL_CODE", "synth_failed")
-        return fail(code, f"fake failure for {part}")
+        msg = os.environ.get("FAKE_CGSYNTH_FAIL_MSG", f"fake failure for {part}")
+        return fail(code, msg)
     if engine == "muse" and soundfont is not None:
         return fail("bad_input", "--soundfont is not supported with muse")
     if resolved is not None and resolved not in SOUNDFONTS:

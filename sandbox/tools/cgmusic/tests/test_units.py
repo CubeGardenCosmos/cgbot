@@ -49,8 +49,19 @@ def test_parse_defaults():
 
 def test_parse_collects_repeated_channel_options():
     opts = parse_render_args(
-        ["a.mid", "--reverb", "1=10", "--reverb", "3=127", "--font-for-channel", "2=Alt",
-         "--gain", "-3", "--jobs", "2"]
+        [
+            "a.mid",
+            "--reverb",
+            "1=10",
+            "--reverb",
+            "3=127",
+            "--font-for-channel",
+            "2=Alt",
+            "--gain",
+            "-3",
+            "--jobs",
+            "2",
+        ]
     )
     assert opts.reverb == {1: 10, 3: 127}
     assert opts.font_for_channel == {2: "Alt"}

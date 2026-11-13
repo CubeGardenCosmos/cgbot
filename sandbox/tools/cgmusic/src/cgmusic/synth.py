@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from cgmusic.errors import SYNTH_FAILED, CgmusicError, from_cgsynth_stderr
+from cgmusic.errors import MUSE_UNAVAILABLE, SYNTH_FAILED, CgmusicError, from_cgsynth_stderr
 
 BIN_ENV = "CGSYNTH_BIN"
 
@@ -22,12 +22,15 @@ BIN_ENV = "CGSYNTH_BIN"
 class RenderCall:
     key: str
     argv: list[str]
+    fallback_argv: list[str] | None = None
 
 
 @dataclass(frozen=True)
 class RenderResult:
     report: dict[str, Any]
     wall_s: float
+    fallback_from: str | None = None
+    fallback_reason: str | None = None
 
 
 class _Cancelled(Exception):
@@ -82,8 +85,7 @@ class _Group:
         for proc in live:
             proc.kill()
 
-    def run(self, argv: list[str]) -> RenderResult:
-        started = time.monotonic()
+    def _execute(self, argv: list[str]) -> tuple[str, str]:
         with self._lock:
             if self._cancelled:
                 raise _Cancelled
@@ -105,7 +107,28 @@ class _Group:
             raise _Cancelled
         if proc.returncode != 0:
             raise from_cgsynth_stderr(stderr, proc.returncode)
-        return RenderResult(parse_stdout(stdout), round(time.monotonic() - started, 3))
+        return stdout, stderr
+
+    def run(self, call: RenderCall) -> RenderResult:
+        started = time.monotonic()
+        try:
+            stdout, _ = self._execute(call.argv)
+            return RenderResult(parse_stdout(stdout), round(time.monotonic() - started, 3))
+        except CgmusicError as exc:
+            if call.fallback_argv is not None and exc.code == MUSE_UNAVAILABLE:
+                reason = (
+                    "muse_silent"
+                    if ("全静音" in exc.message or "silent" in exc.message.lower())
+                    else "muse_unavailable"
+                )
+                stdout, _ = self._execute(call.fallback_argv)
+                return RenderResult(
+                    parse_stdout(stdout),
+                    round(time.monotonic() - started, 3),
+                    fallback_from="muse",
+                    fallback_reason=reason,
+                )
+            raise
 
 
 def render_all(calls: list[RenderCall], workers: int) -> dict[str, RenderResult]:
@@ -115,18 +138,21 @@ def render_all(calls: list[RenderCall], workers: int) -> dict[str, RenderResult]
     first: CgmusicError | None = None
     pool = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="cgsynth")
     try:
-        pending: dict[Future[RenderResult], str] = {
-            pool.submit(group.run, call.argv): call.key for call in calls
+        pending: dict[Future[RenderResult], RenderCall] = {
+            pool.submit(group.run, call): call for call in calls
         }
         for future in as_completed(pending):
+            call = pending[future]
             try:
-                results[pending[future]] = future.result()
+                results[call.key] = future.result()
             except _Cancelled:
                 continue
             except Exception as exc:
                 if first is None:
-                    first = exc if isinstance(exc, CgmusicError) else CgmusicError(
-                        SYNTH_FAILED, str(exc)
+                    first = (
+                        exc
+                        if isinstance(exc, CgmusicError)
+                        else CgmusicError(SYNTH_FAILED, str(exc))
                     )
                     group.cancel()
                     for other in pending:

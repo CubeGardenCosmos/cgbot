@@ -26,6 +26,8 @@ class PartTask:
     engine: str
     soundfont: str | None
     channels: tuple[int, ...]
+    source_channel: int | None = None
+    program: int = 0
 
 
 def read_plan(path: Path) -> dict[str, Any]:
@@ -72,8 +74,11 @@ def resolve_parts(doc: dict[str, Any], opts: RenderOptions) -> list[PartTask]:
         if not isinstance(file, str) or not file:
             raise CgmusicError(BAD_INPUT, f"声部 {part_id} 缺少 file")
         channels = source_channels(part)
-        font = _single({opts.font_for_channel[c] for c in channels if c in opts.font_for_channel},
-                       "--font-for-channel", part_id)
+        font = _single(
+            {opts.font_for_channel[c] for c in channels if c in opts.font_for_channel},
+            "--font-for-channel",
+            part_id,
+        )
         send = _single({opts.reverb[c] for c in channels if c in opts.reverb}, "--reverb", part_id)
         if send is not None:
             mix = part.get("mix")
@@ -101,6 +106,8 @@ def resolve_parts(doc: dict[str, Any], opts: RenderOptions) -> list[PartTask]:
                 engine=engine,
                 soundfont=soundfont,
                 channels=channels,
+                source_channel=channels[0] if channels else None,
+                program=int(part.get("gm_program", 0) or 0),
             )
         )
     return tasks
