@@ -1,4 +1,4 @@
-"""HTML 解析离线测试:搜索卡片、js-store 兜底、乐谱元数据、挑战与 404 识别。"""
+"""HTML 解析离线测试:搜索结果(数据区与卡片锚点)、乐谱元数据、挑战与 404 识别。"""
 
 import pytest
 from fixtures import (
@@ -7,6 +7,7 @@ from fixtures import (
     SCORE_HTML,
     SEARCH_HTML,
     SEARCH_STORE_HTML,
+    search_store_html,
 )
 
 from cgdl.errors import PARSE_FAILED, CgdlError
@@ -16,36 +17,48 @@ from cgdl.parse import (
     is_search_page,
     page_title,
     parse_score_page,
-    parse_search,
+    parse_search_html,
 )
 
 
 def test_parse_search_cards_from_anchors() -> None:
-    hits = parse_search(SEARCH_HTML)
+    hits = parse_search_html(SEARCH_HTML)
     assert [hit.score_id for hit in hits] == [6969530, 222]
     first = hits[0]
     assert first.title == "Gymnopedie No. 1 - Erik Satie (Piano Solo)"
     assert first.url == "https://musescore.com/user/39593079/scores/6969530"
-    assert first.thumbnail == "https://cdn.ustatik.com/musescore/scoredata/g/abc/score_0.png"
+    assert first.composer is None
     assert hits[1].title == "Gymnopedie No. 3 - Erik Satie"
 
 
-def test_parse_search_merges_js_store() -> None:
-    hits = parse_search(SEARCH_STORE_HTML)
+def test_parse_search_reads_store_attribute_and_drops_official() -> None:
+    hits = parse_search_html(SEARCH_STORE_HTML)
     assert len(hits) == 1
     assert hits[0].to_dict() == {
-        "id": 5,
-        "user_id": 9,
-        "title": "Store Title",
+        "score_id": 5,
         "url": "https://musescore.com/user/9/scores/5",
-        "thumbnail": "https://cdn.ustatik.com/t.png",
+        "title": "Store Title",
+        "composer": "Store Composer",
+        "instruments": ["Piano"],
+        "pages": 3,
+        "rating": 4.5,
+        "rating_count": 2,
+        "duration": None,
+        "license": "公有领域",
     }
 
 
-def test_parse_search_empty_page_gives_no_hits() -> None:
-    html = "<html><head><title>Search result for 'zz' | MuseScore</title></head></html>"
-    assert parse_search(html) == []
+def test_parse_search_empty_results_give_no_hits() -> None:
+    html = search_store_html([])
+    assert parse_search_html(html) == []
     assert is_search_page(html)
+
+
+def test_parse_search_without_data_or_cards_is_parse_failed() -> None:
+    html = "<html><head><title>Search result for 'zz' | MuseScore</title></head></html>"
+    with pytest.raises(CgdlError) as info:
+        parse_search_html(html)
+    assert info.value.code == PARSE_FAILED
 
 
 def test_parse_score_page_fields() -> None:

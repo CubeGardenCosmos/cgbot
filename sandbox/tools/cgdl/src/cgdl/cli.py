@@ -32,9 +32,10 @@ def build_parser() -> argparse.ArgumentParser:
     info = sub.add_parser("musescore-info", help="读取乐谱元数据")
     info.add_argument("url", help="https://musescore.com/user/<uid>/scores/<id>")
 
-    get = sub.add_parser("musescore-get", help="下载乐谱文件")
+    get = sub.add_parser("musescore-get", help="下载乐谱文件;png 为指定页的 PNG 图片")
     get.add_argument("url", help="https://musescore.com/user/<uid>/scores/<id>")
-    get.add_argument("--kind", required=True, help="mid | mxl | mp3 | pdf")
+    get.add_argument("--kind", required=True, help="mid | mxl | mp3 | pdf | png")
+    get.add_argument("--page", type=int, default=None, help="png 的页码,从 1 开始(默认 1)")
     get.add_argument("-o", "--output-dir", default=DEFAULT_OUTPUT_DIR, help="绝对路径输出目录")
     return parser
 
@@ -54,12 +55,24 @@ def run(args: argparse.Namespace) -> dict[str, object]:
 
     if args.kind not in KINDS:
         raise CgdlError(
-            UNSUPPORTED_KIND, f"unsupported kind {args.kind!r}; use mid, mxl, mp3 or pdf"
+            UNSUPPORTED_KIND, f"unsupported kind {args.kind!r}; use mid, mxl, mp3, pdf or png"
         )
+    page = _page_number(args)
     ref = parse_score_ref(args.url)
     out_dir = ensure_output_dir(args.output_dir)
     with MuseScoreClient() as client:
-        return client.get(ref, args.kind, out_dir)
+        return client.get(ref, args.kind, out_dir, page=page)
+
+
+def _page_number(args: argparse.Namespace) -> int:
+    if args.kind != "png":
+        if args.page is not None:
+            raise CgdlError(BAD_INPUT, "--page only applies to --kind png")
+        return 1
+    page = 1 if args.page is None else args.page
+    if page < 1:
+        raise CgdlError(BAD_INPUT, "--page must be >= 1")
+    return page
 
 
 def _emit_error(code: str, message: str) -> None:

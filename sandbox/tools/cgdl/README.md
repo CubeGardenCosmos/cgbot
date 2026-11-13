@@ -11,7 +11,7 @@
 ```sh
 cgdl musescore-search <关键词> [--limit N]        # 搜索,默认 --limit 10,上限 50
 cgdl musescore-info <乐谱 URL>                    # 元数据
-cgdl musescore-get <乐谱 URL> --kind mid|mxl|mp3|pdf [-o 目录]
+cgdl musescore-get <乐谱 URL> --kind mid|mxl|mp3|pdf|png [--page N] [-o 目录]
 ```
 
 - 乐谱必须使用完整 URL `https://musescore.com/user/<uid>/scores/<id>`。纯数字 id 无法解析:`musescore.com/scores/<id>` 返回 404,因此以 `bad_url` 拒绝。
@@ -34,11 +34,11 @@ cgdl musescore-get <乐谱 URL> --kind mid|mxl|mp3|pdf [-o 目录]
 
 | 码 | 含义 |
 | --- | --- |
-| `blocked` | 浏览器中 Cloudflare 挑战 60 秒内未通过 |
+| `blocked` | 搜索页挑战 15 秒、乐谱与下载页挑战 60 秒内未通过 |
 | `not_found` | 页面 404,或该类型文件不存在(例如无 MusicXML、无页图) |
 | `parse_failed` | 页面或接口结构与预期不符 |
 | `download_failed` | 下载失败、接口拒绝、超过 40 MiB 上限或文件魔数不符 |
-| `unsupported_kind` | `--kind` 不在 mid/mxl/mp3/pdf 中 |
+| `unsupported_kind` | `--kind` 不在 mid/mxl/mp3/pdf/png 中 |
 | `bad_url` | URL 不在允许的主机内,或格式不对(含纯数字 id) |
 | `bad_input` | 参数为空、过长或输出目录非法(补充码) |
 | `browser_unavailable` | 无法启动 Chromium 或 Playwright(补充码) |
@@ -52,24 +52,31 @@ cgdl musescore-get <乐谱 URL> --kind mid|mxl|mp3|pdf [-o 目录]
 - **体积上限:** 单次下载与 PDF 合计均不超过 40 MiB。
 - **主机白名单:** `musescore.com`、`www.musescore.com`、`static.musescore.com`、`s3w.musescore.com`、`cdn.ustatik.com`。非白名单 URL 在 HTTP 层拒绝,浏览器层中止请求。
 
+## 令牌与 blocked 规则
+
+- **secret 来源:** 先读本地缓存(`CGDL_CACHE_DIR`,默认 `~/.cache/cgdl/token_secret.json`,只保存构建脚本 URL 与 secret);缓存缺失时从页面构建脚本发现并写回缓存。令牌按请求计算,不缓存。
+- **422 拒绝:** jmuse 返回 HTTP 422 时清除缓存,改用字面量回退 `9654,4e`(仅在本进程内使用,从不写入缓存),等待 2 秒后重试;每个 jmuse 请求最多发起 3 次,仍被拒绝则报 `download_failed`。
+- **blocked:** 搜索页等待 Cloudflare 挑战最多 15 秒,乐谱与下载页最多 60 秒;挑战未通过即报 `blocked`,不换用镜像或其他通道重试。
+
 ## 实测矩阵
 
 验证环境:开发机 Chromium 155(`/usr/bin/chromium-browser`),经本机代理 `http://127.0.0.1:10808` 访问,日期 2026-11-12。测试乐谱:Satie《Gymnopédie No.1》,id 6969530(公有领域)。
 
 | 功能 | 状态 | 结果 |
 | --- | --- | --- |
-| `musescore-search gymnopedie` | 已实测 | 返回搜索结果 JSON |
-| `musescore-info <url>` | 已实测 | 标题、作曲、调号、上传者、价格、缩略图完整 |
-| `musescore-get --kind mid` | 已实测 | 3146 字节,`MThd` 魔数 |
-| `musescore-get --kind mp3` | 已实测 | 3,004,707 字节,MPEG 帧同步字节 `ff fb` |
-| `musescore-get --kind pdf` | 已实测 | 1 页,90,429 字节,`%PDF-1.4` |
-| `musescore-get --kind mxl` | 已实测 | 返回 `not_found`(该乐谱无 MusicXML) |
-| 纯数字 id | 已实测 | 返回 `bad_url` |
-| 普通 HTTP 403 挑战后回退浏览器 | 已实测 | httpx 得 403,浏览器通过挑战后取得页面 |
-| 集成测试 `pytest -m integration` | 已实测 | 1 passed(搜索、信息、mid、mp3) |
-| 离线单元测试 | 已实测 | 99 passed,1 个集成用例按默认跳过 |
-| ruff | 已实测 | All checks passed |
-| pyright | 已实测 | 0 errors |
+| `musescore-search gymnopedie` | 未复测 | 前次(2026-11-12)实测返回搜索结果 JSON |
+| `musescore-info <url>` | 未复测 | 前次实测:标题、作曲、调号、上传者、价格、缩略图完整 |
+| `musescore-get --kind mid` | 未复测 | 前次实测:3146 字节,`MThd` 魔数 |
+| `musescore-get --kind mp3` | 未复测 | 前次实测:3,004,707 字节,MPEG 帧同步字节 `ff fb` |
+| `musescore-get --kind pdf` | 未复测 | 前次实测:1 页,90,429 字节,`%PDF-1.4` |
+| `musescore-get --kind mxl` | 未复测 | 前次实测:返回 `not_found`(该乐谱无 MusicXML) |
+| 纯数字 id | 未复测 | 前次实测:返回 `bad_url` |
+| 普通 HTTP 403 挑战后回退浏览器 | 未复测 | 前次实测:httpx 得 403,浏览器通过挑战后取得页面 |
+| 集成测试 `pytest -m integration` | 未执行 | 本轮未运行;本轮未对 musescore.com 发起任何实网访问 |
+| 离线单元测试 `uv run pytest` | 已实测(本轮) | 123 passed, 1 deselected(集成用例按默认跳过) |
+| `uv run ruff check` | 已实测(本轮) | All checks passed! |
+| `uv run ruff format --check` | 已实测(本轮) | 23 files already formatted |
+| pyright | 未执行 | 本轮未运行;前次记录 0 errors,已过期 |
 | 沙箱内 `/usr/bin/chromium` | 未验证 | 开发机无此路径;沙箱镜像内需实际启动确认 |
 | 沙箱内访问 musescore.com | 未验证 | 需按下节的白名单确认出网 |
 | 多页乐谱的 PDF 拼接 | 未验证 | 仅单元测试(假浏览器) |

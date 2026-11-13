@@ -4,6 +4,7 @@
 - page_fetch:在页面上下文内 fetch(携带页面的 Cookie 与来源),用于 /api/jmuse。
 - fetch_bytes / fetch_text:经 BrowserContext.request 拉取签名文件,共享同一 Cookie 罐。
 - render_pdf:把各页 SVG 嵌入 A4 文档,由 Chromium 打印为 PDF。
+- render_png:把单页 SVG 嵌入页面,对图片元素截图得到 PNG(单页大小上限与其他 kind 相同)。
 
 所有网络请求都经过同一限速器。浏览器只允许白名单主机,其余请求直接中止。
 """
@@ -42,6 +43,12 @@ _PDF_HEAD = (
     "</style></head><body>"
 )
 
+_PNG_HEAD = (
+    '<!doctype html><html><head><meta charset="utf-8"><style>'
+    "html, body { margin: 0; padding: 0; background: #fff; } img { display: block; }"
+    "</style></head><body>"
+)
+
 
 def proxy_settings(url: str) -> dict[str, str]:
     """把 HTTPS_PROXY 形式的 URL 转为 Playwright 代理设置(用户信息拆出为 username/password)。"""
@@ -57,12 +64,12 @@ def proxy_settings(url: str) -> dict[str, str]:
     return settings
 
 
+def svg_img(svg: bytes) -> str:
+    return f'<img src="data:image/svg+xml;base64,{base64.b64encode(svg).decode("ascii")}" alt="">'
+
+
 def pdf_document(pages: list[bytes]) -> str:
-    images = "".join(
-        f'<img src="data:image/svg+xml;base64,{base64.b64encode(page).decode("ascii")}" alt="">'
-        for page in pages
-    )
-    return _PDF_HEAD + images + "</body></html>"
+    return _PDF_HEAD + "".join(svg_img(page) for page in pages) + "</body></html>"
 
 
 def _route_request(route: Route) -> None:
@@ -141,7 +148,7 @@ class BrowserSession:
             self._playwright = None
         self._page = None
 
-    def open(self, url: str) -> tuple[int | None, str]:
+    def open(self, url: str, challenge_wait_s: float = CHALLENGE_WAIT_S) -> tuple[int | None, str]:
         page = self._live_page()
         self._throttle.wait()
         try:
@@ -151,7 +158,7 @@ class BrowserSession:
                 DOWNLOAD_FAILED, f"page navigation failed ({type(exc).__name__})"
             ) from exc
         status = response.status if response is not None else None
-        self._wait_for_challenge(page)
+        self._wait_for_challenge(page, challenge_wait_s)
         html = page.content()
         if status == 404 or is_not_found_page(html):
             raise CgdlError(NOT_FOUND, "page returned 404")
@@ -203,8 +210,21 @@ class BrowserSession:
             raise CgdlError(DOWNLOAD_FAILED, "rendered PDF exceeds the size cap")
         return data
 
-    def _wait_for_challenge(self, page: Page) -> None:
-        deadline = time.monotonic() + CHALLENGE_WAIT_S
+    def render_png(self, svg: bytes, max_bytes: int) -> bytes:
+        page = self._live_page()
+        page.set_content(_PNG_HEAD + svg_img(svg) + "</body></html>", wait_until="load")
+        try:
+            data = page.locator("img").screenshot(type="png", timeout=FETCH_TIMEOUT_MS)
+        except Exception as exc:
+            raise CgdlError(
+                DOWNLOAD_FAILED, f"PNG rendering failed ({type(exc).__name__})"
+            ) from exc
+        if len(data) > max_bytes:
+            raise CgdlError(DOWNLOAD_FAILED, "rendered PNG exceeds the size cap")
+        return data
+
+    def _wait_for_challenge(self, page: Page, wait_s: float) -> None:
+        deadline = time.monotonic() + wait_s
         while True:
             try:
                 title = page.title()
@@ -214,7 +234,7 @@ class BrowserSession:
             if title and not is_challenge_title(title):
                 return
             if time.monotonic() >= deadline:
-                raise CgdlError(BLOCKED, "Cloudflare challenge did not clear within 60 s")
+                raise CgdlError(BLOCKED, f"Cloudflare challenge did not clear within {wait_s:g} s")
             page.wait_for_timeout(2000)
 
     def _live_page(self) -> Page:

@@ -24,27 +24,38 @@ SEARCH_HTML = """<!doctype html><html><head>
 </body></html>
 """
 
-SEARCH_STORE_HTML = (
-    "<!doctype html><html><head><title>Search result for 'x' | MuseScore</title></head><body>"
-    '<div class="js-store" data-content="'
-    + html_lib.escape(
-        json.dumps(
-            {
-                "search": {
-                    "scores": [
-                        {
-                            "id": 5,
-                            "title": "Store Title",
-                            "url": "https://musescore.com/user/9/scores/5",
-                            "thumbnail": "https://cdn.ustatik.com/t.png",
-                        }
-                    ]
-                }
-            }
-        )
+SEARCH_STORE_SCORES: list[dict[str, object]] = [
+    {
+        "id": 5,
+        "href": "https://musescore.com/user/9/scores/5",
+        "title": "Store [b]Title[/b]",
+        "composer_name": "Store Composer",
+        "instruments": [{"name": "Piano"}],
+        "pages_count": 3,
+        "rating": {"rating": 4.5, "count": 2},
+        "license": None,
+        "is_public_domain": True,
+    },
+    {
+        "id": 6,
+        "href": "https://musescore.com/user/9/scores/6",
+        "title": "Official",
+        "is_official": True,
+    },
+]
+
+
+def search_store_html(scores: list[dict[str, object]]) -> str:
+    """搜索页:结果放在随机哈希名的数据区属性里(值为 HTML 转义的 JSON)。"""
+    payload = {"store": {"page": {"data": {"scores": scores}}}}
+    attr = html_lib.escape(json.dumps(payload), quote=True)
+    return (
+        "<!doctype html><html><head><title>Search result for 'x' | MuseScore</title></head><body>"
+        f'<div data-7f3a9c="{attr}"></div></body></html>'
     )
-    + '"></div></body></html>'
-)
+
+
+SEARCH_STORE_HTML = search_store_html(SEARCH_STORE_SCORES)
 
 NOT_FOUND_HTML = (
     "<!doctype html><html><head><title>Page not found (404) | MuseScore</title></head></html>"
@@ -69,6 +80,12 @@ SCORE_HTML = """<!doctype html><html><head>
 """
 
 BUILD_JS = 'function t(n,r,i){return md5(n+r+i+"' + FAKE_SECRET + '").substr(0, 4)}'
+
+# 同时含 MD5 初始化常量的脚本:只能由宽松规则提取(LibreScore 形式)。
+BUILD_JS_LOOSE = (
+    "var k=[1732584193,-271733879,-1732584194,271733878];"
+    'function t(n){return md5(n+"' + FAKE_SECRET + '").substr(0,4)}'
+)
 
 MID_BYTES = b"MThd\x00\x00\x00\x06\x00\x01\x00\x01\x00\x60"
 MP3_BYTES = b"\xff\xfb\x90\x44" + b"\x00" * 16

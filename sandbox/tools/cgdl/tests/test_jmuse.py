@@ -3,7 +3,7 @@
 import hashlib
 
 import pytest
-from fixtures import BUILD_JS, FAKE_SECRET
+from fixtures import BUILD_JS, BUILD_JS_LOOSE, FAKE_SECRET
 
 from cgdl.errors import DOWNLOAD_FAILED, PARSE_FAILED, CgdlError
 from cgdl.jmuse import find_token_secret, jmuse_url, make_token, parse_jmuse
@@ -64,3 +64,13 @@ def test_parse_jmuse_malformed_is_parse_failed(payload: object) -> None:
     with pytest.raises(CgdlError) as info:
         parse_jmuse(200, payload)
     assert info.value.code == PARSE_FAILED
+
+
+def test_find_secret_loose_rule_needs_md5_constants() -> None:
+    assert find_token_secret(BUILD_JS_LOOSE) == FAKE_SECRET
+    assert find_token_secret(BUILD_JS_LOOSE.replace("1732584193", "0")) is None
+
+
+def test_loose_rule_ignored_without_md5_constants() -> None:
+    script = f'function t(n){{return md5(n+"{FAKE_SECRET}").substr(0,4)}}'
+    assert find_token_secret(script) is None
