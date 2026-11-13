@@ -27,6 +27,17 @@ std::string join(const std::vector<std::string>& names) {
 
 std::string text_or_empty(const char* value) { return value != nullptr ? value : ""; }
 
+template <typename Fn>
+auto abi_call(const char* name, Fn&& fn) -> decltype(fn()) {
+  try {
+    return fn();
+  } catch (const std::exception& e) {
+    throw Error("muse_unavailable", std::string("MuseSampler ") + name + " 抛出异常: " + e.what());
+  } catch (...) {
+    throw Error("muse_unavailable", std::string("MuseSampler ") + name + " 抛出未知异常");
+  }
+}
+
 }  // namespace
 
 std::vector<std::string> bind_version_symbols(const SymbolLookup& lookup, Api& api) {
@@ -43,11 +54,15 @@ std::vector<std::string> bind_version_symbols(const SymbolLookup& lookup, Api& a
 
 Version query_version(const Api& api) {
   Version version;
-  version.major = api.ms_get_version_major();
-  version.minor = api.ms_get_version_minor();
-  version.revision = api.ms_get_version_revision();
-  if (api.ms_get_version_build_number != nullptr) version.build = api.ms_get_version_build_number();
-  if (api.ms_get_version_string != nullptr) version.text = text_or_empty(api.ms_get_version_string());
+  version.major = abi_call("ms_get_version_major", api.ms_get_version_major);
+  version.minor = abi_call("ms_get_version_minor", api.ms_get_version_minor);
+  version.revision = abi_call("ms_get_version_revision", api.ms_get_version_revision);
+  if (api.ms_get_version_build_number != nullptr) {
+    version.build = abi_call("ms_get_version_build_number", api.ms_get_version_build_number);
+  }
+  if (api.ms_get_version_string != nullptr) {
+    version.text = text_or_empty(abi_call("ms_get_version_string", api.ms_get_version_string));
+  }
   if (version.text.empty()) {
     version.text = std::to_string(version.major) + "." + std::to_string(version.minor) + "." +
                    std::to_string(version.revision);
@@ -129,14 +144,15 @@ void MuseLib::init(const std::string& sample_root) const {
       ::setenv("MUSESAMPLER_INSTRUMENT_FOLDER", sample_root.c_str(), 1) != 0) {
     throw Error("muse_unavailable", "无法设置 MUSESAMPLER_INSTRUMENT_FOLDER");
   }
-  const abi::ms_Result init_result =
-      init_kind_ == InitKind::Init3 ? api_.ms_init_3() : api_.ms_init_2();
+  const abi::ms_Result init_result = abi_call(
+      init_kind_ == InitKind::Init3 ? "ms_init_3" : "ms_init_2",
+      [&] { return init_kind_ == InitKind::Init3 ? api_.ms_init_3() : api_.ms_init_2(); });
   if (init_result != abi::kResultOk) {
     throw Error("muse_unavailable", std::string(init_kind_ == InitKind::Init3 ? "ms_init_3" : "ms_init_2") +
                                         " 失败,返回 " + std::to_string(init_result) +
                                         "(返回 -5 为样本根 .instruments 缺失;返回 -6 为 receipt/授权记录缺失,即 ~/.local/share/muse-sounds-manager/.receipt 不存在;返回 -1 原因未确定)");
   }
-  const abi::ms_Result reverb_result = api_.ms_disable_reverb();
+  const abi::ms_Result reverb_result = abi_call("ms_disable_reverb", api_.ms_disable_reverb);
   if (reverb_result != abi::kResultOk) {
     throw Error("muse_unavailable", "ms_disable_reverb 失败,返回 " + std::to_string(reverb_result));
   }
@@ -144,17 +160,22 @@ void MuseLib::init(const std::string& sample_root) const {
 
 std::vector<InstrumentEntry> MuseLib::list_instruments() const {
   std::vector<InstrumentEntry> entries;
-  const abi::ms_InstrumentList list = api_.ms_get_instrument_list();
+  const abi::ms_InstrumentList list = abi_call("ms_get_instrument_list", api_.ms_get_instrument_list);
   if (list == nullptr) return entries;
-  while (abi::ms_InstrumentInfo info = api_.ms_InstrumentList_get_next(list)) {
+  while (abi::ms_InstrumentInfo info =
+             abi_call("ms_InstrumentList_get_next", [&] { return api_.ms_InstrumentList_get_next(list); })) {
     InstrumentEntry entry;
-    entry.id = api_.ms_Instrument_get_id(info);
-    entry.name = text_or_empty(api_.ms_Instrument_get_name(info));
-    entry.category = text_or_empty(api_.ms_Instrument_get_category(info));
-    entry.package = text_or_empty(api_.ms_Instrument_get_package(info));
+    entry.id = abi_call("ms_Instrument_get_id", [&] { return api_.ms_Instrument_get_id(info); });
+    entry.name = text_or_empty(
+        abi_call("ms_Instrument_get_name", [&] { return api_.ms_Instrument_get_name(info); }));
+    entry.category = text_or_empty(
+        abi_call("ms_Instrument_get_category", [&] { return api_.ms_Instrument_get_category(info); }));
+    entry.package = text_or_empty(
+        abi_call("ms_Instrument_get_package", [&] { return api_.ms_Instrument_get_package(info); }));
     entries.push_back(std::move(entry));
   }
   return entries;
 }
+
 
 }  // namespace cgmusic::muse

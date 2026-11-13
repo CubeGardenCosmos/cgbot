@@ -468,3 +468,14 @@ Windows 上的库与样本都是 Muse Hub 安装结果,不是 MuseScore 自带�
      - 耗时：Wall time `7.61 s`（干声渲染 `1.00 s`）
      - 内存：Peak RSS `64,412 KB` (~63 MB)
      - 声学核验：输出**非静音**（非全零，RMS / 动态特征完全符合真实乐器渲染），验证了官方 Linux `libMuseSamplerCoreLib.so` 0.106.0 在本地无破解环境中配合收据已完全具备真实的离线渲染能力。
+
+## 19. 已许可乐器交集、按通道回退与真实渲染 [已验证]
+
+更新日期:2026-11-13。本节为追加,不修改 §0–§18。
+
+- **交集**:乐器候选集 = 库 `list_instruments` 实际接受的乐器 ∩ `.instruments` 目录;库拒绝的乐器(Strings / Brass / Drumline)不会被选中。
+- **按通道回退**:无已许可 Muse 乐器的通道用 FluidSynth(默认 sf3)渲染并混入同一母带,输出 JSON `fallbacks` 记录 `{channel, bank, program, reason: "muse_instrument_not_licensed"}`。全部通道都回退时返回 `muse_unavailable`。
+- **异常保护**:跨 C ABI 的库调用包在 try/catch 里,转为结构化 JSON 错误。
+- **鼓组实测发现**:本机 0.106.0 下,`GM Kit`(id 188)在 `trigger_render` 时由库内部抛出 `std::invalid_argument("Invalid file name")` 并 `terminate`,这是库内的原生异常,try/catch 拦不住。原因未深究。`Drum Kit`(id 178)正常渲染,因此鼓组候选顺序改为 `Drum Kit` 优先、`GM Kit` 回退。
+- **真实渲染 `parasailing.mid`**(`--engine muse`,§18 的容器配方):退出码 0;时长 91.67 s(MIDI 90.0 s);-14.08 LUFS;真峰值 -1.55 dBTP;LRA 1.55;未削波;墙钟 32.3 s。弦乐、铜管通道按上述规则回退到 FluidSynth(`musescore_general_full`)。
+- **未验证**:未逐通道核对 RMS;未做听感验收;`GM Kit` 抛异常的原因未查。

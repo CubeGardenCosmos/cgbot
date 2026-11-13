@@ -212,6 +212,11 @@ int cmd_render(int argc, char** argv) {
       throw Error("bad_input", "--soundfont 与 --font-for-channel 仅适用于 fluidsynth 引擎");
     }
     audio = render_sequence_muse(sequence, options, kTargetLufs + gain_db, &muse_report);
+    report.fallbacks = muse_report.fallbacks;
+    if (!muse_report.fallbacks.empty()) {
+      const fs::path dir = soundfont_dir();
+      font = default_soundfont(dir);
+    }
   } else {
     const fs::path dir = soundfont_dir();
     font = args.soundfont ? resolve_soundfont(dir, *args.soundfont) : default_soundfont(dir);
@@ -370,8 +375,7 @@ int run(int argc, char** argv) {
 }
 
 void print_error(const std::string& code, const std::string& message) {
-  std::cerr << "{\"error\":" << json_string(code) << ",\"message\":" << json_string(message)
-            << "}\n";
+  std::cerr << format_error_json(code, message) << "\n";
 }
 
 }  // namespace
@@ -384,6 +388,8 @@ int main(int argc, char** argv) {
     cgmusic::print_error(error.code(), error.what());
   } catch (const std::exception& error) {
     cgmusic::print_error("synth_failed", error.what());
+  } catch (...) {
+    cgmusic::print_error("synth_failed", "Unknown unhandled exception");
   }
   return 1;
 }

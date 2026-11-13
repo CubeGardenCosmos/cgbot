@@ -382,4 +382,104 @@ Audio render_sequence(const MidiSequence& sequence, const SoundfontInfo& primary
   return audio;
 }
 
+Audio render_fluidsynth_channel(const MidiSequence& sequence, int channel,
+                                const SoundfontInfo& soundfont, const RenderOptions& options,
+                                std::size_t total_frames) {
+  const SettingsPtr settings = make_settings(options.reverb);
+  fluid_settings_setint(settings.get(), "synth.reverb.active", 0);
+  fluid_settings_setint(settings.get(), "synth.chorus.active", 0);
+
+  SynthPtr synth(new_fluid_synth(settings.get()));
+  if (!synth) throw Error("synth_failed", "FluidSynth synthesizer allocation failed");
+  require(fluid_synth_set_interp_method(synth.get(), -1, FLUID_INTERP_7THORDER), "interpolation");
+
+  const int sfont_id = load_font(synth.get(), soundfont.path);
+  const auto presets = preset_keys(read_presets(font_of(synth.get(), sfont_id)));
+
+  std::array<int, 16> bank_msb{};
+  std::array<ChannelSends, 16> sends{};
+  for (int ch = 0; ch < 16; ++ch) {
+    sends[ch] = initial_sends(options.reverb.channel_send, ch);
+  }
+
+  const int init_bank = channel == kDrumChannel ? kDrumBank : 0;
+  const PresetKey init_preset = resolve_preset(presets, PresetKey{init_bank, 0});
+  fluid_synth_program_select(synth.get(), channel, sfont_id, init_preset.bank, init_preset.program);
+
+  Audio audio;
+  audio.rate = kSampleRate;
+  audio.channels.assign(2, std::vector<float>(total_frames, 0.0F));
+
+  const double rate = static_cast<double>(kSampleRate);
+  std::size_t position = 0;
+  std::array<float, kBlockFrames> left{};
+  std::array<float, kBlockFrames> right{};
+
+  const auto render_until = [&](std::size_t target) {
+    target = std::min(target, total_frames);
+    while (position < target) {
+      const std::size_t count = std::min(kBlockFrames, target - position);
+      if (fluid_synth_write_float(synth.get(), static_cast<int>(count), left.data(), 0, 1,
+                                  right.data(), 0, 1) != FLUID_OK) {
+        throw Error("synth_failed", "FluidSynth rendering failed");
+      }
+      for (std::size_t i = 0; i < count; ++i) {
+        audio.channels[0][position + i] += left[i];
+        audio.channels[1][position + i] += right[i];
+      }
+      position += count;
+    }
+  };
+
+  for (const MidiEvent& event : sequence.events) {
+    const int ch = event.status & 0x0F;
+    if (ch != channel) continue;
+    render_until(static_cast<std::size_t>(std::llround(event.seconds * rate)));
+
+    switch (event.status & 0xF0) {
+      case 0x80:
+        fluid_synth_noteoff(synth.get(), ch, event.data1);
+        break;
+      case 0x90:
+        if (event.data2 == 0) {
+          fluid_synth_noteoff(synth.get(), ch, event.data1);
+        } else {
+          fluid_synth_noteon(synth.get(), ch, event.data1, event.data2);
+        }
+        break;
+      case 0xA0:
+        fluid_synth_key_pressure(synth.get(), ch, event.data1, event.data2);
+        break;
+      case 0xB0:
+        if (event.data1 == kBankSelectMsb) {
+          bank_msb[ch] = event.data2;
+        } else if (event.data1 == kReverbCc || event.data1 == kChorusCc) {
+          update_sends(options.reverb.channel_send, ch, event, sends[ch]);
+        } else {
+          fluid_synth_cc(synth.get(), ch, event.data1, event.data2);
+        }
+        break;
+      case 0xC0: {
+        const int bank = ch == kDrumChannel ? kDrumBank : bank_msb[ch];
+        const PresetKey wanted{bank, event.data1};
+        const PresetKey preset = resolve_preset(presets, wanted);
+        fluid_synth_program_select(synth.get(), ch, sfont_id, preset.bank, preset.program);
+        update_sends(options.reverb.channel_send, ch, event, sends[ch]);
+        break;
+      }
+      case 0xD0:
+        fluid_synth_channel_pressure(synth.get(), ch, event.data1);
+        break;
+      case 0xE0:
+        fluid_synth_pitch_bend(synth.get(), ch,
+                               event.data1 | (static_cast<int>(event.data2) << 7));
+        break;
+      default:
+        break;
+    }
+  }
+  render_until(total_frames);
+  return audio;
+}
+
 }  // namespace cgmusic

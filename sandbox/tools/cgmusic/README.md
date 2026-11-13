@@ -24,8 +24,9 @@ cgmusic analyze <audio>
 - stdout 输出一行 JSON;错误输出 `{"error":code,"message":...}` 到 stderr,退出码非 0。
 - 音色目录:环境变量 `CGMUSIC_SOUNDFONTS`,默认 `/opt/soundfonts`(只读)。
 - `--engine` 默认 `fluidsynth`;`muse` 使用真实 MuseSampler 库。库路径由 `MUSESAMPLER_LIB` 指定,缺省 `/opt/musesampler/lib/libMuseSamplerCoreLib.so`;样本根由 `MUSE_SAMPLES_DIR` 指定,缺省 `/opt/muse-sounds`(包含 `.instruments`,均只读)。不将库或样本放入仓库/镜像。
-- Muse 按发声 MIDI 通道创建轨道,使用该通道最后一个 GM 程序号、音符时值、速度表 BPM 与力度事件。没有映射乐器、初始化或渲染失败、输出静音时返回 `muse_unavailable`,**不会回退 FluidSynth**。`--soundfont` 与 `--font-for-channel` 仅适用于 FluidSynth。
-- Muse 干声按乐器族进入 `src/mix/` 的自动平衡、混响发送、总线混响与 -14 LUFS / -1.5 dBTP 母带;输出 JSON 的 `muse.tracks` 与 `muse.mix` 给出轨道及混音报告。
+- `--engine muse`: 使用真实 MuseSampler 库。乐器候选集由库实际通过收据许可的乐器表（`list_instruments`）与样本目录库（`.instruments` SQLite）取交集构建。对于 GM 程序号无可用/已许可 Muse 乐器的发声通道，显式回退到 FluidSynth（使用默认 SoundFont 渲染该通道干声），并混合进同一共享混音母带；在输出 JSON 的 `fallbacks` 数组中记录 `{"channel": ch, "program": prog, "reason": "muse_instrument_not_licensed"}`。若所有发声通道均需回退，则返回 `muse_unavailable` 报错。
+- 库调用异常保护：所有跨 C ABI 的库调用（`add_track`、`init`、`process_offline` 等）均包裹在 try/catch 中，转换为结构化 JSON 错误输出，避免未捕获异常导致 `std::terminate` 崩溃。
+- Muse 与回退通道干声按乐器族进入 `src/mix/` 的自动平衡、混响发送、总线混响与 -14 LUFS / -1.5 dBTP 母带；输出 JSON 的 `muse.tracks` 给出 Muse 轨道报告，`muse.mix` 给出整体混音报告。
 - 默认输出目录 `/workspace/artifacts/music/`。
 - `--gain G`:相对 -14 LUFS 目标的 dB 偏移,限 ±12;真峰值上限仍为 -1.5 dBTP。
 - `--reverb CH=0-127`(可重复):MIDI 通道 1-16 的混响发送(CC91),优先级最高,覆盖文件中的 CC91 与默认表。

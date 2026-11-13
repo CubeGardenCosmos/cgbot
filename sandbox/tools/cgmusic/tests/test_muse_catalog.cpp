@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "muse/catalog.hpp"
+#include "muse/loader.hpp"
 #include "muse/mapping.hpp"
 #include "test_harness.hpp"
 
@@ -209,4 +210,33 @@ CGMUSIC_TEST(real_muse_catalog_counts_when_samples_dir_set) {
   }
   CGMUSIC_CHECK(!catalog.empty());
   CGMUSIC_CHECK(has_gm_kit);
+}
+
+CGMUSIC_TEST(catalog_intersect_filters_rejected_and_handles_empty) {
+  const cgmusic::Catalog full = {
+      {91, "Violins 1", "Vlns.", "Muse Strings", "strings"},
+      {110, "Trumpet", "Tpt.", "Muse Brass", "brass"},
+      {167, "Piano", "Pno.", "Muse Keys", "keys"},
+      {188, "GM Kit", "Perc.", "Muse Percussion", "percussion"},
+      {207, "Music Box", "M. Box", "Muse Music Box", "percussion"},
+  };
+
+  const std::vector<int> accepted_ids = {167, 188, 999};
+  const cgmusic::Catalog intersected = cgmusic::intersect_catalog(full, accepted_ids);
+  CGMUSIC_CHECK(intersected.size() == 2);
+  CGMUSIC_CHECK(intersected[0].id == 167);
+  CGMUSIC_CHECK(intersected[1].id == 188);
+
+  // 空白接受列表产生空目录
+  const cgmusic::Catalog empty_intersected = cgmusic::intersect_catalog(full, std::vector<int>{});
+  CGMUSIC_CHECK(empty_intersected.empty());
+
+  // InstrumentEntry 重载
+  std::vector<cgmusic::muse::InstrumentEntry> entries;
+  entries.push_back({167, "Piano", "Keys", "Muse Keys"});
+  entries.push_back({207, "Music Box", "Music Box", "Muse Music Box"});
+  const cgmusic::Catalog from_entries = cgmusic::intersect_catalog(full, entries);
+  CGMUSIC_CHECK(from_entries.size() == 2);
+  CGMUSIC_CHECK(from_entries[0].id == 167);
+  CGMUSIC_CHECK(from_entries[1].id == 207);
 }

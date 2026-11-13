@@ -94,6 +94,12 @@ std::vector<PresetInfo> list_font_presets(const std::filesystem::path& path);
 Audio render_sequence(const MidiSequence& sequence, const SoundfontInfo& primary,
                       const RenderOptions& options, RenderReport* report);
 
+// 渲染单个 MIDI 通道的干声(44.1 kHz 立体声 float),使用指定的 SoundFont。
+// 混响与合唱在合成器内部关闭,由外部混音器统一处理。
+Audio render_fluidsynth_channel(const MidiSequence& sequence, int channel,
+                                const SoundfontInfo& soundfont, const RenderOptions& options,
+                                std::size_t total_frames);
+
 struct MuseTrackReport {
   int channel;  // 1-16
   int program;
@@ -105,6 +111,7 @@ struct MuseTrackReport {
 
 struct MuseRenderResult {
   std::vector<MuseTrackReport> tracks;
+  std::vector<MissingPreset> fallbacks;  // 回退到 FluidSynth 的通道记录
   std::string version;
   double reverb_room = 0.0;
   double reverb_level = 0.0;

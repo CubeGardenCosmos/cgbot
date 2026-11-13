@@ -72,5 +72,8 @@ std::string json_string(std::string_view value) {
   result.push_back('"');
   return result;
 }
+std::string format_error_json(const std::string& code, const std::string& message) {
+  return "{\"error\":" + json_string(code) + ",\"message\":" + json_string(message) + "}";
+}
 
 }  // namespace cgmusic

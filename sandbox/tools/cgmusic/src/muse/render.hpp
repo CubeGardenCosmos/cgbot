@@ -28,8 +28,10 @@ struct ChannelPlan {
 
 std::uint64_t articulation_for_program(int program) noexcept;
 
-// 每个发声 MIDI 通道一条 Muse 轨道;PC 取最后一次值,力度取最后一个非零 note-on。
-// 任一发声通道没有候选乐器即抛 muse_unavailable,避免漏掉声部后仍输出。
+// 每个发声 MIDI 通道一条计划;PC 取最后一次值,力度取最后一个非零 note-on。
+// 没有对应已许可 Muse 乐器的通道 instrument_id 为 nullopt (回退到 FluidSynth);
+// 若全部发声通道都需回退,则抛出 muse_unavailable。
+std::string family_for_gm(int program, bool is_drum) noexcept;
 std::vector<ChannelPlan> plan_channels(const MidiSequence& sequence,
                                        const RenderOptions& options, const Catalog& catalog);
 
@@ -62,6 +64,12 @@ DryRender render_dry(const MuseLib& lib, const std::vector<ChannelPlan>& plans, 
 // 混音入口独立于动态库,便于用真实平面 PCM 验证响度与真峰值处理。
 Audio mix_rendered(const DryRender& dry, const std::vector<ChannelPlan>& plans,
                    const RenderOptions& options, double target_lufs, MuseRenderResult* report);
+
+// 混合 Muse 干声轨道与 FluidSynth 回退干声轨道
+Audio mix_hybrid(const DryRender& dry, const std::vector<ChannelPlan>& muse_plans,
+                 const std::vector<Audio>& fallback_stems,
+                 const std::vector<ChannelPlan>& fallback_plans,
+                 const RenderOptions& options, double target_lufs, MuseRenderResult* report);
 
 Audio render_sequence_muse(const MidiSequence& sequence, const RenderOptions& options,
                            double target_lufs, MuseRenderResult* report);

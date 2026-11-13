@@ -1,5 +1,7 @@
 #include "muse/catalog.hpp"
 
+#include "muse/loader.hpp"
+#include <unordered_set>
 #include <algorithm>
 #include <cctype>
 #include <cstdio>
@@ -195,6 +197,27 @@ Catalog load_catalog(const fs::path& dir) {
     return std::tie(a.id, a.package, a.name) < std::tie(b.id, b.package, b.name);
   });
   return catalog;
+}
+
+Catalog intersect_catalog(const Catalog& catalog, const std::vector<int>& accepted_ids) {
+  const std::unordered_set<int> accepted(accepted_ids.begin(), accepted_ids.end());
+  Catalog result;
+  result.reserve(catalog.size());
+  for (const MuseInstrument& instrument : catalog) {
+    if (accepted.count(instrument.id) > 0) {
+      result.push_back(instrument);
+    }
+  }
+  return result;
+}
+
+Catalog intersect_catalog(const Catalog& catalog, const std::vector<muse::InstrumentEntry>& accepted) {
+  std::vector<int> ids;
+  ids.reserve(accepted.size());
+  for (const auto& entry : accepted) {
+    if (entry.id >= 0) ids.push_back(entry.id);
+  }
+  return intersect_catalog(catalog, ids);
 }
 
 }  // namespace cgmusic

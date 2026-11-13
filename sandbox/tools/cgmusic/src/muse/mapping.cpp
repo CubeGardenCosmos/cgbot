@@ -19,9 +19,9 @@ struct Candidate {
 };
 
 constexpr Candidate kCandidates[] = {
-    // 鼓组通道(MIDI 通道 10):GM Kit 优先,Drum Kit 回退
-    {true, 0, 127, "GM Kit", nullptr},
+    // 鼓组通道(MIDI 通道 10):Drum Kit 优先。实测本机 0.106.0 渲染 GM Kit 时库内抛出 invalid_argument("Invalid file name")并 terminate,Drum Kit 正常。
     {true, 0, 127, "Drum Kit", nullptr},
+    {true, 0, 127, "GM Kit", nullptr},
 
     // 钢琴、键盘与打击键盘
     {false, 0, 2, "Piano", nullptr},

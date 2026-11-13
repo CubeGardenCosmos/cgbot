@@ -291,3 +291,96 @@ CGMUSIC_TEST(muse_process_error_stops_instead_of_returning_audio) {
   CGMUSIC_CHECK(error_code_of([&] { session.render(512); }) == "muse_unavailable");
   CGMUSIC_CHECK(state.calls.back() == "process");
 }
+
+CGMUSIC_TEST(muse_all_fallback_triggers_muse_unavailable_error) {
+  MidiSequence sequence;
+  sequence.duration_s = 1.0;
+  sequence.events = {{0.0, 0xC0, 48, 0}, note(0.0, 0, 60, 100), off(1.0, 0, 60)};
+  // catalog 中只有 Flute 118,没有弦乐 91
+  Catalog woodwinds_only = {{118, "Flute 1", "Fl.", "Muse Woodwinds", "woodwinds"}};
+  CGMUSIC_CHECK(error_code_of([&] {
+    cgmusic::muse::plan_channels(sequence, RenderOptions{}, woodwinds_only);
+  }) == "muse_unavailable");
+}
+
+CGMUSIC_TEST(muse_partial_fallback_plans_and_hybrid_mixes_channels) {
+  MidiSequence sequence;
+  sequence.duration_s = 1.0;
+  sequence.events = {
+      {0.0, 0xC0, 73, 0}, note(0.0, 0, 72, 80), off(1.0, 0, 72),
+      {0.0, 0xC1, 48, 0}, note(0.0, 1, 60, 90), off(1.0, 1, 60),
+  };
+  Catalog woodwinds_only = {{118, "Flute 1", "Fl.", "Muse Woodwinds", "woodwinds"}};
+  const auto plans = cgmusic::muse::plan_channels(sequence, RenderOptions{}, woodwinds_only);
+  CGMUSIC_CHECK(plans.size() == 2);
+  // 通道 0 (Flute) 具有 Muse 乐器
+  CGMUSIC_CHECK(plans[0].channel == 0);
+  CGMUSIC_CHECK(plans[0].instrument_id.has_value());
+  CGMUSIC_CHECK(*plans[0].instrument_id == 118);
+  CGMUSIC_CHECK(plans[0].family == "woodwinds");
+  // 通道 1 (Strings) 需回退到 FluidSynth
+  CGMUSIC_CHECK(plans[1].channel == 1);
+  CGMUSIC_CHECK(!plans[1].instrument_id.has_value());
+  CGMUSIC_CHECK(plans[1].family == "strings");
+
+  // 验证 hybrid 混合
+  cgmusic::muse::DryRender dry;
+  dry.stems.resize(1);
+  dry.stems[0].rate = cgmusic::kSampleRate;
+  dry.stems[0].channels.assign(2, std::vector<float>(cgmusic::kSampleRate, 0.2F));
+
+  std::vector<cgmusic::Audio> fallback_stems(1);
+  fallback_stems[0].rate = cgmusic::kSampleRate;
+  fallback_stems[0].channels.assign(2, std::vector<float>(cgmusic::kSampleRate, 0.3F));
+
+  cgmusic::MuseRenderResult report;
+  // 记录回退条目
+  report.fallbacks.push_back({plans[1].channel + 1, cgmusic::PresetKey{0, plans[1].program},
+                              "muse_instrument_not_licensed"});
+  cgmusic::RenderOptions options;
+  options.reverb.level = 0.0;
+  const Audio mixed = cgmusic::muse::mix_hybrid(dry, {plans[0]}, fallback_stems, {plans[1]},
+                                                options, -14.0, &report);
+  CGMUSIC_CHECK(mixed.frames() == cgmusic::kSampleRate);
+  CGMUSIC_CHECK(report.tracks.size() == 1);
+  CGMUSIC_CHECK(report.tracks[0].channel == 1);
+  CGMUSIC_CHECK(report.tracks[0].instrument_id == 118);
+  CGMUSIC_CHECK(report.fallbacks.size() == 1);
+  CGMUSIC_CHECK(report.fallbacks[0].channel == 2);
+  CGMUSIC_CHECK(report.fallbacks[0].wanted.program == 48);
+  CGMUSIC_CHECK(report.fallbacks[0].reason == "muse_instrument_not_licensed");
+  CGMUSIC_CHECK(report.mix_report.find("\"channel\":1") != std::string::npos);
+  CGMUSIC_CHECK(report.mix_report.find("\"channel\":2") != std::string::npos);
+}
+
+CGMUSIC_TEST(muse_abi_exception_caught_and_formatted_as_json) {
+  FakeState state;
+  cgmusic::muse::Api api = fake_api(state);
+  api.ms_MuseSampler_add_track = [](cgmusic::muse::abi::ms_MuseSampler, int) -> cgmusic::muse::abi::ms_Track {
+    throw std::invalid_argument("Invalid file name");
+  };
+  api.ms_MuseSampler_destroy = [](cgmusic::muse::abi::ms_MuseSampler) {
+    // 模拟析构期间库也抛出异常,不应触发 std::terminate
+    throw std::runtime_error("destroy failed during unwind");
+  };
+
+  ChannelPlan channel;
+  channel.instrument_id = 91;
+  channel.notes.resize(1);
+
+  try {
+    cgmusic::muse::SamplerSession session(api);
+    session.add_score({channel});
+    cgmusic::test::check_failed("expected exception", __FILE__, __LINE__);
+  } catch (const cgmusic::Error& error) {
+    CGMUSIC_CHECK(error.code() == "muse_unavailable");
+    const std::string msg = error.what();
+    CGMUSIC_CHECK(msg.find("ms_MuseSampler_add_track") != std::string::npos);
+    CGMUSIC_CHECK(msg.find("Invalid file name") != std::string::npos);
+
+    const std::string json = cgmusic::format_error_json(error.code(), error.what());
+    CGMUSIC_CHECK(json.find("\"error\":\"muse_unavailable\"") != std::string::npos);
+    CGMUSIC_CHECK(json.find("\"message\":") != std::string::npos);
+    CGMUSIC_CHECK(json.find("Invalid file name") != std::string::npos);
+  }
+}

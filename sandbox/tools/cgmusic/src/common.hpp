@@ -49,5 +49,6 @@ struct Audio {
 std::vector<std::uint8_t> read_file(const std::filesystem::path& path, std::size_t maximum);
 void write_file(const std::filesystem::path& path, const std::vector<std::uint8_t>& data);
 std::string json_string(std::string_view value);
+std::string format_error_json(const std::string& code, const std::string& message);
 
 }  // namespace cgmusic
