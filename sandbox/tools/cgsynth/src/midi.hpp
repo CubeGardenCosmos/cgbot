@@ -32,12 +32,6 @@ struct MidiTempo {
   double bpm() const noexcept { return 60'000'000.0 / microseconds_per_quarter; }
 };
 
-// 拨奏/弓奏切换事件(仅 MusicXML 路径填充,MIDI 输入路径保持空)。
-struct PizzicatoEv {
-  double seconds = 0.0;
-  bool pizz = false;  // true = 拨奏(pizz.)生效,false = 弓奏恢复(arco)
-};
-
 struct MidiSequence {
   std::vector<MidiEvent> events;     // 通道消息,按时间排序(同刻先 note-off)
   double duration_s = 0.0;           // 最长轨道结束点的时间
@@ -46,8 +40,6 @@ struct MidiSequence {
   std::vector<std::string> channel_names;
   // 通道打击乐标志(索引即虚拟通道);SMF 读取时通道 9 为 true。
   std::vector<bool> channel_is_drum;
-  // 拨奏/弓奏切换时间列表(索引即虚拟通道);按 seconds 升序;仅 MusicXML 路径填充。
-  std::vector<std::vector<PizzicatoEv>> pizzicato_ranges;
 };
 
 // 解析 SMF 0/1/2(metrical timing)。超过 15 分钟抛出 too_long。

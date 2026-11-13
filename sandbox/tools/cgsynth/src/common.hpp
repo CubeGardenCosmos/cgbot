@@ -28,14 +28,6 @@ class Error final : public std::runtime_error {
   std::string code_;
 };
 
-struct Quality {
-  double lufs = 0.0;
-  double true_peak_dbtp = 0.0;
-  double lra = 0.0;
-  bool clipped = false;
-  double duration_s = 0.0;
-};
-
 // 平面 float 音频;各声道长度相同。
 struct Audio {
   unsigned rate = kSampleRate;

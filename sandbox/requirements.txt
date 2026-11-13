@@ -36,3 +36,7 @@ cryptography
 playwright
 pytesseract
 mido==1.3.3
+# Audio post-processing for cgmaster/cgmusic (soundfile wheels bundle libsndfile).
+pedalboard
+soundfile
+pyloudnorm

@@ -252,7 +252,6 @@ MidiSequence parse_midi(const std::vector<std::uint8_t>& data) {
   sequence.channel_names = std::move(channel_names);
   sequence.channel_is_drum.assign(16, false);
   sequence.channel_is_drum[9] = true;
-  sequence.pizzicato_ranges.resize(16);
 
   if (sequence.duration_s > kMaxMidiSeconds) {
     throw Error("too_long", "The score exceeds the 15 minute playback limit");

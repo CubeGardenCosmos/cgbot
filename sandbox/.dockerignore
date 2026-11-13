@@ -6,5 +6,6 @@
 **/*.pyc
 **/.pytest_cache
 tools/cgmusic/build
+tools/cgsynth/build
 **/.venv
 **/uv.lock

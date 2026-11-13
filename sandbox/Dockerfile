@@ -1,20 +1,20 @@
 # cgbot-sandbox: per-user Codex app-server sandbox image.
 # Build context: the sandbox/ directory. bridge/ (bridge MCP) and skills/image-gen are produced
 # by their owning slices and copied in at build time.
-# ---- cgmusic-build: 编译 sandbox/tools/cgmusic(C++17/CMake) ----
+# ---- cgsynth-build: 编译 sandbox/tools/cgsynth(C++17/CMake,仅合成核心) ----
 # 与最终镜像同为 Debian bookworm(node:22-bookworm-slim),动态库 ABI 一致,运行库见最终阶段 apt 层。
-FROM node:22-bookworm-slim AS cgmusic-build
+FROM node:22-bookworm-slim AS cgsynth-build
 ENV DEBIAN_FRONTEND=noninteractive
 RUN node -e "const fs=require('node:fs'); const p='/etc/apt/sources.list.d/debian.sources'; fs.writeFileSync(p,fs.readFileSync(p,'utf8').replaceAll('deb.debian.org','mirrors.aliyun.com').replaceAll('security.debian.org','mirrors.aliyun.com'))" \
     && printf '%s\n' 'Acquire::http::Proxy "DIRECT";' 'Acquire::https::Proxy "DIRECT";' > /etc/apt/apt.conf.d/99direct \
     && apt-get update && apt-get install -y --no-install-recommends \
       build-essential cmake pkg-config \
-      libfluidsynth-dev libebur128-dev libsndfile1-dev libmp3lame-dev libpugixml-dev libzip-dev libsqlite3-dev \
+      libfluidsynth-dev libsqlite3-dev \
     && rm -rf /var/lib/apt/lists/*
-COPY tools/cgmusic /src/cgmusic
-RUN cmake -S /src/cgmusic -B /src/build -DCMAKE_BUILD_TYPE=Release \
+COPY tools/cgsynth /src/cgsynth
+RUN cmake -S /src/cgsynth -B /src/build -DCMAKE_BUILD_TYPE=Release \
     && cmake --build /src/build --parallel \
-    && mkdir -p /out && cp /src/build/cgmusic /out/cgmusic && strip /out/cgmusic
+ && mkdir -p /out && cp /src/build/cgsynth /out/cgsynth && strip /out/cgsynth
 
 # ---- final image ----
 FROM node:22-bookworm-slim
@@ -46,7 +46,7 @@ RUN node -e "const fs=require('node:fs'); const p='/etc/apt/sources.list.d/debia
       ca-certificates curl git bash tini chromium fonts-noto-cjk fontconfig \
       python3 python3-markdown weasyprint xz-utils procps openssh-client netcat-openbsd \
       tesseract-ocr tesseract-ocr-eng tesseract-ocr-chi-sim imagemagick ffmpeg \
-      libfluidsynth3 libebur128-1 libsndfile1 libmp3lame0 libpugixml1v5 libzip4 libsqlite3-0 \
+      libfluidsynth3 libsndfile1 libmp3lame0 libsqlite3-0 \
     && rm -rf /var/lib/apt/lists/*
 
 COPY fontconfig/99-cgbot-cjk.conf /etc/fonts/conf.d/99-cgbot-cjk.conf
@@ -92,9 +92,26 @@ RUN python3 -m pip install --no-cache-dir --no-deps /opt/cgbot/tools/cgmidi \
     && ln -sf "$(python3 -c 'import sysconfig; print(sysconfig.get_path("scripts"))')/cgmidi" /usr/local/bin/cgmidi \
     && cgmidi --help >/dev/null
 
-# cgmusic:由 cgmusic-build 阶段编译的原生合成器;运行库在上面的 apt 层安装。
-COPY --from=cgmusic-build /out/cgmusic /usr/local/bin/cgmusic
-RUN ! ldd /usr/local/bin/cgmusic | grep -q 'not found'
+# cgsynth:由 cgsynth-build 阶段编译的原生合成核心(仅 FluidSynth / MuseSampler 合成);运行库在上面的 apt 层安装。
+COPY --from=cgsynth-build /out/cgsynth /usr/local/bin/cgsynth
+RUN ! ldd /usr/local/bin/cgsynth | grep -q 'not found'
+
+# Python 工具(cgscore 前处理、cgmaster 后处理、cgmusic 编排),与 cgmidi 相同方式安装;依赖由 requirements.txt 提供。
+COPY tools/cgscore /opt/cgbot/tools/cgscore
+RUN python3 -m pip install --no-cache-dir --no-deps /opt/cgbot/tools/cgscore \
+    && ln -sf "$(python3 -c 'import sysconfig; print(sysconfig.get_path("scripts"))')/cgscore" /usr/local/bin/cgscore \
+    && cgscore --help >/dev/null
+
+COPY tools/cgmaster /opt/cgbot/tools/cgmaster
+RUN python3 -m pip install --no-cache-dir --no-deps /opt/cgbot/tools/cgmaster \
+    && ln -sf "$(python3 -c 'import sysconfig; print(sysconfig.get_path("scripts"))')/cgmaster" /usr/local/bin/cgmaster \
+    && cgmaster --help >/dev/null
+
+COPY tools/cgmusic /opt/cgbot/tools/cgmusic
+RUN python3 -m pip install --no-cache-dir --no-deps /opt/cgbot/tools/cgmusic \
+    && ln -sf "$(python3 -c 'import sysconfig; print(sysconfig.get_path("scripts"))')/cgmusic" /usr/local/bin/cgmusic \
+    && cgmusic --help >/dev/null
+
 
 COPY tools/richdoc /opt/cgbot/tools/richdoc
 RUN cd /opt/cgbot/tools/richdoc \
