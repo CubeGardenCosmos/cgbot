@@ -16,7 +16,7 @@ inline constexpr std::size_t kMaxMidiBytes = 8U * 1024U * 1024U;
 inline constexpr double kMaxMidiSeconds = 15.0 * 60.0;
 inline constexpr unsigned kSampleRate = 44100;
 
-// 错误码:bad_input, too_long, no_soundfont, synth_failed, bad_musicxml, unsupported。
+// 错误码:bad_input, too_long, no_soundfont, synth_failed, bad_musicxml, unsupported, muse_unavailable, muse_version。
 class Error final : public std::runtime_error {
  public:
   Error(std::string code, const std::string& message)

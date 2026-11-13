@@ -32,6 +32,13 @@ cgmusic analyze <audio>
 - JSON 额外包含 `balance`(各声部偏移与实际增益)与 `reverb`(房间、电平、各通道最终发送量 `reverb_send`/`chorus_send` 及来源 `reverb_source`/`chorus_source`,取值 `cli`、`file`、`table`)。
 - 上限:MIDI 字节 8 MiB,播放时长 15 分钟(超出返回 `too_long`)。长乐谱会占用约为时长 × 44100 × 2 × 4 字节 × 3 的内存。
 
+## 内部模块(尚未接入 CLI)
+
+- `src/mix/`:混响总线与混音器(`reverb`、`mixer`)。`main.cpp` 尚未调用。
+- `src/muse/`:MuseSampler 运行库加载器(`loader`,`dlopen` + 版本门)、Muse 目录库读取(`catalog`,SQLite 只读)与声部映射(`mapping`)。
+- 新增构建依赖:`libsqlite3-dev`(运行时 `libsqlite3-0`)。可选探针 `muse_probe` 由 `-DCGMUSIC_BUILD_PROBE=ON` 打开,默认关闭。
+- Muse 引擎渲染(`--engine muse`)**尚未对外暴露**,`render` 目前仅使用 FluidSynth。
+
 ## 依赖选择 / 库调研
 
 - 没有可直接使用的 MusicXML→MIDI 库:Debian bookworm 与 vcpkg 均无此类打包库。

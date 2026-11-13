@@ -9,7 +9,7 @@ RUN node -e "const fs=require('node:fs'); const p='/etc/apt/sources.list.d/debia
     && printf '%s\n' 'Acquire::http::Proxy "DIRECT";' 'Acquire::https::Proxy "DIRECT";' > /etc/apt/apt.conf.d/99direct \
     && apt-get update && apt-get install -y --no-install-recommends \
       build-essential cmake pkg-config \
-      libfluidsynth-dev libebur128-dev libsndfile1-dev libmp3lame-dev libpugixml-dev libzip-dev \
+      libfluidsynth-dev libebur128-dev libsndfile1-dev libmp3lame-dev libpugixml-dev libzip-dev libsqlite3-dev \
     && rm -rf /var/lib/apt/lists/*
 COPY tools/cgmusic /src/cgmusic
 RUN cmake -S /src/cgmusic -B /src/build -DCMAKE_BUILD_TYPE=Release \
@@ -46,7 +46,7 @@ RUN node -e "const fs=require('node:fs'); const p='/etc/apt/sources.list.d/debia
       ca-certificates curl git bash tini chromium fonts-noto-cjk fontconfig \
       python3 python3-markdown weasyprint xz-utils procps openssh-client netcat-openbsd \
       tesseract-ocr tesseract-ocr-eng tesseract-ocr-chi-sim imagemagick ffmpeg \
-      libfluidsynth3 libebur128-1 libsndfile1 libmp3lame0 libpugixml1v5 libzip4 \
+      libfluidsynth3 libebur128-1 libsndfile1 libmp3lame0 libpugixml1v5 libzip4 libsqlite3-0 \
     && rm -rf /var/lib/apt/lists/*
 
 COPY fontconfig/99-cgbot-cjk.conf /etc/fonts/conf.d/99-cgbot-cjk.conf

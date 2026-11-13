@@ -143,18 +143,19 @@ class TempoMap {
  public:
   TempoMap(std::uint16_t division, const std::vector<TempoChange>& changes) {
     const double seconds_per_quarter_unit = 1.0 / 1e6 / static_cast<double>(division);
-    segments_.push_back({0, 0.0, kDefaultMicrosPerQuarter * seconds_per_quarter_unit});
+    segments_.push_back({0, 0.0, kDefaultMicrosPerQuarter * seconds_per_quarter_unit, kDefaultMicrosPerQuarter});
     for (const auto& change : changes) {
       if (change.micros_per_quarter == 0) bad_midi("Invalid MIDI tempo");
       const double per_tick = change.micros_per_quarter * seconds_per_quarter_unit;
       Segment& last = segments_.back();
       if (change.tick == last.tick) {
         last.seconds_per_tick = per_tick;
+        last.micros_per_quarter = change.micros_per_quarter;
         continue;
       }
       const double seconds =
           last.seconds + static_cast<double>(change.tick - last.tick) * last.seconds_per_tick;
-      segments_.push_back({change.tick, seconds, per_tick});
+      segments_.push_back({change.tick, seconds, per_tick, change.micros_per_quarter});
     }
   }
 
@@ -166,11 +167,22 @@ class TempoMap {
     return segment.seconds + static_cast<double>(tick - segment.tick) * segment.seconds_per_tick;
   }
 
+  // 导出速度表:每段的起始刻、起始秒与微秒/四分音符。
+  std::vector<MidiTempo> tempos() const {
+    std::vector<MidiTempo> out;
+    out.reserve(segments_.size());
+    for (const Segment& segment : segments_) {
+      out.push_back({segment.tick, segment.seconds, segment.micros_per_quarter});
+    }
+    return out;
+  }
+
  private:
   struct Segment {
     std::uint64_t tick;
     double seconds;
     double seconds_per_tick;
+    std::uint32_t micros_per_quarter;
   };
   std::vector<Segment> segments_;
 };
@@ -219,6 +231,7 @@ MidiSequence parse_midi(const std::vector<std::uint8_t>& data) {
 
   MidiSequence sequence;
   sequence.duration_s = tempo_map.seconds_at(longest_tick);
+  sequence.tempo_map = tempo_map.tempos();
   if (sequence.duration_s > kMaxMidiSeconds) {
     throw Error("too_long", "The score exceeds the 15 minute playback limit");
   }
@@ -237,6 +250,15 @@ MidiSequence parse_midi(const std::vector<std::uint8_t>& data) {
 
 double midi_duration(const std::vector<std::uint8_t>& data) {
   return parse_midi(data).duration_s;
+}
+
+MidiTempo midi_tempo_at(const MidiSequence& sequence, double seconds) {
+  if (sequence.tempo_map.empty()) return MidiTempo{};
+  const auto it = std::upper_bound(
+      sequence.tempo_map.begin(), sequence.tempo_map.end(), seconds,
+      [](double value, const MidiTempo& tempo) { return value < tempo.seconds; });
+  if (it == sequence.tempo_map.begin()) return sequence.tempo_map.front();
+  return *(it - 1);
 }
 
 }  // namespace cgmusic

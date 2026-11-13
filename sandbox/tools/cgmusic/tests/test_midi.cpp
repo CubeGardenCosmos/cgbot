@@ -118,3 +118,41 @@ CGMUSIC_TEST(bad_header_and_truncated_track_are_bad_input) {
   truncated.resize(truncated.size() - 2);
   CGMUSIC_CHECK(error_code_of(truncated) == "bad_input");
 }
+
+// 速度表:无速度事件时为默认 120 BPM,首段从 0 秒开始;查询任意时刻得到默认段。
+CGMUSIC_TEST(tempo_map_defaults_to_120_bpm_without_tempo_events) {
+  const Bytes data = smf(0, 480,
+                         {{0, {0x90, 0x3C, 0x60}}, {480, {0x80, 0x3C, 0x00}}, {0, kEndOfTrack}});
+  const cgmusic::MidiSequence sequence = cgmusic::parse_midi(data);
+  CGMUSIC_CHECK(sequence.tempo_map.size() == 1);
+  CGMUSIC_CHECK(sequence.tempo_map[0].tick == 0);
+  CGMUSIC_CHECK(sequence.tempo_map[0].microseconds_per_quarter == 500000);
+  CGMUSIC_CHECK(near(sequence.tempo_map[0].bpm(), 120.0));
+  CGMUSIC_CHECK(near(sequence.tempo_map[0].seconds, 0.0));
+  CGMUSIC_CHECK(near(cgmusic::midi_tempo_at(sequence, sequence.events[1].seconds).bpm(), 120.0));
+  CGMUSIC_CHECK(near(cgmusic::midi_tempo_at(cgmusic::MidiSequence{}, 1.0).bpm(), 120.0));
+}
+
+// 速度变化后,按秒查询每个音符所处的速度段。480 PPQ:刻 0-480 为 120 BPM(0.5 s),
+// 刻 480 起改为 250000 us/拍(240 BPM,0.25 s),音符结束于刻 960(0.75 s)。
+CGMUSIC_TEST(tempo_accessor_reports_tempo_per_note) {
+  const Bytes set_tempo{0xFF, 0x51, 0x03, 0x03, 0xD0, 0x90};
+  const Bytes data = smf(0, 480,
+                         {{0, {0x90, 0x3C, 0x60}},
+                          {480, set_tempo},
+                          {480, {0x80, 0x3C, 0x00}},
+                          {0, kEndOfTrack}});
+  const cgmusic::MidiSequence sequence = cgmusic::parse_midi(data);
+  CGMUSIC_CHECK(sequence.tempo_map.size() == 2);
+  CGMUSIC_CHECK(sequence.tempo_map[1].tick == 480);
+  CGMUSIC_CHECK(near(sequence.tempo_map[1].seconds, 0.5));
+  CGMUSIC_CHECK(sequence.tempo_map[1].microseconds_per_quarter == 250000);
+  CGMUSIC_CHECK(near(sequence.tempo_map[1].bpm(), 240.0));
+  CGMUSIC_CHECK(near(sequence.duration_s, 0.75));
+  CGMUSIC_CHECK(sequence.events.size() == 2);
+  CGMUSIC_CHECK(near(cgmusic::midi_tempo_at(sequence, sequence.events[0].seconds).bpm(), 120.0));
+  CGMUSIC_CHECK(near(cgmusic::midi_tempo_at(sequence, sequence.events[1].seconds).bpm(), 240.0));
+  CGMUSIC_CHECK(near(cgmusic::midi_tempo_at(sequence, 0.4).bpm(), 120.0));
+  CGMUSIC_CHECK(near(cgmusic::midi_tempo_at(sequence, 0.5001).bpm(), 240.0));
+  CGMUSIC_CHECK(near(cgmusic::midi_tempo_at(sequence, -1.0).bpm(), 120.0));
+}
