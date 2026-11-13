@@ -1,0 +1,41 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cgmaster"
+version = "0.1.0"
+description = "Per-part stem mixing and mastering for cgbot (pedalboard/soundfile/pyloudnorm)"
+requires-python = ">=3.10"
+dependencies = [
+  "numpy>=1.26",
+  "pedalboard>=0.9",
+  "pyloudnorm>=0.1.1",
+  "scipy>=1.11",
+  "soundfile>=0.12",
+]
+
+[dependency-groups]
+dev = ["pytest>=8", "ruff>=0.6", "pyright>=1.1.380"]
+
+[project.scripts]
+cgmaster = "cgmaster.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "ASYNC"]
+
+[tool.pyright]
+include = ["src", "tests"]
+pythonVersion = "3.10"
+typeCheckingMode = "standard"
