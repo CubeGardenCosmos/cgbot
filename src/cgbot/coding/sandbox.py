@@ -132,6 +132,11 @@ class DockerSandboxProvider:
     def lease(self, user_id: str) -> AbstractAsyncContextManager[SandboxEndpoint]:
         return self._lease(validate_user_id(user_id))
 
+    @property
+    def docker(self) -> DockerClient:
+        """The allowlisted Engine API client; the search runner execs cgdl through it."""
+        return self._docker
+
     @asynccontextmanager
     async def _lease(self, user_id: str) -> AsyncIterator[SandboxEndpoint]:
         uid = validate_user_id(user_id)

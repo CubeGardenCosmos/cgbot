@@ -56,7 +56,7 @@ from cgbot.provider.tiers import effort_for
 from cgbot.scheduler import KIND_COMPACTION_IDLE, Scheduler, SystemEvent
 from cgbot.search import SearchService, search_tools
 from cgbot.search.gemini import GeminiSearchClient
-from cgbot.search.musescore import MuseScoreClient
+from cgbot.search.musescore import MuseScoreClient, SandboxCgdlRunner
 from cgbot.search.xsearch import GrokXSearchClient, XSearchService
 from cgbot.session import AsyncSessionStore
 from cgbot.timefmt import time_instruction
@@ -355,7 +355,15 @@ class App:
         self._music_skill = build_injector(music) if config.coding is not None else None
         # Musescore 搜索/预览只进私聊注册表;需 [music] enabled 且 musescore_enabled。
         self._musescore: MuseScoreClient | None = (
-            MuseScoreClient() if music.enabled and music.musescore_enabled else None
+            MuseScoreClient(
+                SandboxCgdlRunner(self._coding.sandbox),
+                Path(config.coding.docker.host_data_dir),
+            )
+            if music.enabled
+            and music.musescore_enabled
+            and self._coding is not None
+            and config.coding is not None
+            else None
         )
         self._memes = MemeStore(storage.for_module("meme"))
         self._vision = build_vision(config.provider.vision, storage.images, fetch=image_fetch)

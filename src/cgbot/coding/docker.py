@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Sequence
+from dataclasses import dataclass
 from typing import Any
 
 import httpx
@@ -16,7 +18,7 @@ import httpx
 _NAME = r"[a-zA-Z0-9][a-zA-Z0-9_.-]*"
 
 # (method, path regex) pairs this client uses. Every entry must match a proxy allowlist rule;
-# tests assert that subset relation. No logs/wait/images/volumes/exec endpoints.
+# tests assert that subset relation. No logs/wait/images/volumes endpoints.
 _ROUTES: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("GET", re.compile(r"/containers/json")),
     ("GET", re.compile(rf"/containers/{_NAME}/json")),
@@ -24,8 +26,12 @@ _ROUTES: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("POST", re.compile(rf"/containers/{_NAME}/start")),
     ("POST", re.compile(rf"/containers/{_NAME}/stop")),
     ("DELETE", re.compile(rf"/containers/{_NAME}")),
+    ("POST", re.compile(rf"/containers/{_NAME}/exec")),
+    ("POST", re.compile(r"/exec/[a-zA-Z0-9]+/start")),
+    ("GET", re.compile(r"/exec/[a-zA-Z0-9]+/json")),
 )
 _REF = re.compile(_NAME)
+_EXEC_ID = re.compile(r"[a-zA-Z0-9]+")
 
 
 class DockerError(Exception):
@@ -61,6 +67,41 @@ def _error_message(response: httpx.Response) -> str:
     if isinstance(body, dict) and isinstance(body.get("message"), str):
         return body["message"][:200]
     return f"status {response.status_code}"
+
+
+@dataclass(frozen=True, slots=True)
+class ExecResult:
+    """One finished exec: inspect's ExitCode plus the demultiplexed streams."""
+
+    exit_code: int
+    stdout: bytes
+    stderr: bytes
+
+
+def _demux(raw: bytes) -> tuple[bytes, bytes]:
+    """Split a Docker multiplexed stream.
+
+    Frame = kind (1=stdout, 2=stderr), 3 spare bytes, 4-byte big-endian size.
+    """
+    out = bytearray()
+    err = bytearray()
+    pos = 0
+    while pos < len(raw):
+        if pos + 8 > len(raw):
+            raise DockerError(0, "exec output frame truncated")
+        kind = raw[pos]
+        size = int.from_bytes(raw[pos + 4 : pos + 8], "big")
+        body = raw[pos + 8 : pos + 8 + size]
+        if len(body) != size:
+            raise DockerError(0, "exec output frame truncated")
+        if kind == 1:
+            out += body
+        elif kind == 2:
+            err += body
+        else:
+            raise DockerError(0, f"unknown exec output stream {kind}")
+        pos += 8 + size
+    return bytes(out), bytes(err)
 
 
 class DockerClient:
@@ -106,6 +147,36 @@ class DockerClient:
         params = {"force": "true" if force else "false"}
         await self._call("DELETE", f"/containers/{_check_ref(ref)}", params=params, ok=(204,))
 
+    async def exec_run(self, container: str, cmd: Sequence[str], *, timeout_s: float) -> ExecResult:
+        """Run ``cmd`` once in ``container``: create exec, start it, inspect ExitCode.
+
+        Only the three exec routes are used; container logs and wait are never called.
+        """
+        created = await self._call(
+            "POST",
+            f"/containers/{_check_ref(container)}/exec",
+            body={"AttachStdout": True, "AttachStderr": True, "Cmd": list(cmd)},
+            ok=(201,),
+        )
+        payload = created.json()
+        exec_id = payload.get("Id") if isinstance(payload, dict) else None
+        if not isinstance(exec_id, str) or not _EXEC_ID.fullmatch(exec_id):
+            raise DockerError(0, "exec create returned no valid id")
+        started = await self._call(
+            "POST",
+            f"/exec/{exec_id}/start",
+            body={"Detach": False, "Tty": False},
+            ok=(200,),
+            timeout_s=timeout_s,
+        )
+        stdout, stderr = _demux(started.content)
+        inspected = await self._call("GET", f"/exec/{exec_id}/json", ok=(200,))
+        payload = inspected.json()
+        exit_code = payload.get("ExitCode") if isinstance(payload, dict) else None
+        if not isinstance(exit_code, int) or isinstance(exit_code, bool):
+            raise DockerError(0, "exec inspect returned no exit code")
+        return ExecResult(exit_code=exit_code, stdout=stdout, stderr=stderr)
+
     async def _call(
         self,
         method: str,
@@ -114,10 +185,14 @@ class DockerClient:
         params: dict[str, str] | None = None,
         body: dict[str, Any] | None = None,
         ok: tuple[int, ...] = (200, 201, 204),
+        timeout_s: float | None = None,
     ) -> httpx.Response:
         if not any(m == method and rx.fullmatch(path) for m, rx in _ROUTES):
             raise ForbiddenRoute(f"{method} {path} is not a sandbox lifecycle route")
-        response = await self._http.request(method, path, params=params, json=body)
+        request_timeout = httpx.USE_CLIENT_DEFAULT if timeout_s is None else timeout_s
+        response = await self._http.request(
+            method, path, params=params, json=body, timeout=request_timeout
+        )
         if response.status_code in ok:
             return response
         message = _error_message(response)

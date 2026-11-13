@@ -370,6 +370,10 @@ def _open_workspace(host_root: Path, user_id: str, parts: Sequence[str], *, crea
         raise
 
 
+class WorkspaceFileTooLarge(OSError):
+    """A workspace file is larger than the caller's byte limit."""
+
+
 def _identity(info: os.stat_result) -> tuple[int, int, int, int, int]:
     return (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
 
@@ -382,11 +386,22 @@ def _read_all_bounded(fd: int, limit: int) -> bytes:
             break
         data.extend(chunk)
     if len(data) > limit:
-        raise _InvalidImage("image exceeds 20 MiB")
+        raise WorkspaceFileTooLarge(f"file exceeds {limit} bytes")
     return bytes(data)
 
 
-def _read_reference(host_root: Path, user_id: str, parts: tuple[str, ...]) -> bytes:
+def read_workspace_file(
+    host_root: Path, user_id: str, parts: Sequence[str], max_bytes: int
+) -> bytes:
+    """Read ``<host_root>/users/<user_id>/<parts...>`` with no symlink hops, at most ``max_bytes``.
+
+    Raises ``WorkspaceFileTooLarge`` above the limit; any other failure (not a stable regular
+    single-link file, unsafe path, changed while reading) is an ``OSError``.
+    """
+    if not _USER_ID_RE.fullmatch(user_id) or not parts:
+        raise OSError("invalid workspace path")
+    if any(part in ("", ".", "..") or "\x00" in part or "\\" in part for part in parts):
+        raise OSError("unsafe workspace path")
     dir_fd = _open_workspace(host_root, user_id, parts[:-1], create=False)
     try:
         fd = os.open(parts[-1], _FILE_FLAGS, dir_fd=dir_fd)
@@ -396,15 +411,22 @@ def _read_reference(host_root: Path, user_id: str, parts: tuple[str, ...]) -> by
         before = os.fstat(fd)
         if not stat.S_ISREG(before.st_mode) or before.st_nlink != 1:
             raise OSError("not a regular single-link file")
-        if before.st_size > MAX_IMAGE_BYTES:
-            raise _InvalidImage("image exceeds 20 MiB")
-        data = _read_all_bounded(fd, MAX_IMAGE_BYTES)
+        if before.st_size > max_bytes:
+            raise WorkspaceFileTooLarge(f"file exceeds {max_bytes} bytes")
+        data = _read_all_bounded(fd, max_bytes)
         after = os.fstat(fd)
         if _identity(before) != _identity(after) or len(data) != before.st_size:
             raise OSError("file changed while reading")
         return data
     finally:
         os.close(fd)
+
+
+def _read_reference(host_root: Path, user_id: str, parts: tuple[str, ...]) -> bytes:
+    try:
+        return read_workspace_file(host_root, user_id, parts, MAX_IMAGE_BYTES)
+    except WorkspaceFileTooLarge:
+        raise _InvalidImage("image exceeds 20 MiB") from None
 
 
 def _load_references(host_root: Path, user_id: str, paths: Sequence[str]) -> list[_Reference]:

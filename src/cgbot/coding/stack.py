@@ -85,6 +85,11 @@ class CodingStack:
         self.service: CodingService = self._manager
         self._started = False
 
+    @property
+    def sandbox(self) -> DockerSandboxProvider:
+        """Per-user sandbox provider: leases the user container and owns the Docker client."""
+        return self._sandbox
+
     async def start(self) -> None:
         """Start sandboxes, manager recovery, bridge sweeper and the web listener (idempotent).
 

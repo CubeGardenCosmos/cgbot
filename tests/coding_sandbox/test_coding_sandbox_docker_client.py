@@ -121,10 +121,10 @@ async def test_guard_refuses_routes_outside_sandbox_lifecycle_without_sending():
 
     client = _client(handler)
     for method, path in (
-        ("POST", "/containers/cgbot-sbx-1/exec"),
         ("GET", "/images/json"),
-        ("POST", "/exec/abc123/start"),
         ("GET", "/containers/cgbot-sbx-1/logs"),
+        ("POST", "/containers/cgbot-sbx-1/wait"),
+        ("POST", "/containers/cgbot-sbx-1/kill"),
     ):
         with pytest.raises(ForbiddenRoute):
             await client._call(method, path)  # noqa: SLF001 - boundary under test
@@ -151,6 +151,9 @@ async def test_client_routes_are_all_permitted_by_proxy_allowlist():
         ("POST", "/containers/cgbot-sbx-1001/start"),
         ("POST", "/containers/cgbot-sbx-1001/stop"),
         ("DELETE", "/containers/cgbot-sbx-1001"),
+        ("POST", "/containers/cgbot-sbx-1001/exec"),
+        ("POST", "/exec/abc123def/start"),
+        ("GET", "/exec/abc123def/json"),
     )
     for method, path in samples:
         assert any(m == method and re.fullmatch(rx, path) for m, rx in PROXY_ALLOWLIST), (
