@@ -323,6 +323,9 @@ DryRender render_dry(const MuseLib& lib, const std::vector<ChannelPlan>& plans,
   return result;
 }
 
+// 回落到 FluidSynth(GM 音源)的通道先削 12 dB,再进入混音,避免盖过 Muse 采样音色。
+constexpr float kFallbackGain = 0.25118864F;  // 10^(-12/20)
+
 Audio mix_hybrid(const DryRender& dry, const std::vector<ChannelPlan>& muse_plans,
                  const std::vector<Audio>& fallback_stems,
                  const std::vector<ChannelPlan>& fallback_plans,
@@ -374,6 +377,8 @@ Audio mix_hybrid(const DryRender& dry, const std::vector<ChannelPlan>& muse_plan
     input.channel = plan.channel + 1;
     input.left = fallback_stems[i].channels[0];
     input.right = fallback_stems[i].channels[1];
+    for (float& sample : input.left) sample *= kFallbackGain;
+    for (float& sample : input.right) sample *= kFallbackGain;
     input.reverb_send = plan.sends.reverb;
     stems.push_back(std::move(input));
   }
