@@ -53,7 +53,7 @@ cgmidi info /workspace/inbox/score.mid
 cgmidi process /workspace/inbox/score.mid -o /tmp/cgmidi/score_ep.mid --set-program 1=10 --transpose -2
 ```
 
-## cgmusic(原生合成器)
+## cgmusic(渲染编排,渲染为音频)
 
 ```
 cgmusic soundfonts
@@ -64,8 +64,8 @@ cgmusic render <file> [--soundfont ID|FILE] [--font-for-channel CH=ID]...
 cgmusic analyze <audio>
 ```
 
-cgmusic 没有 `--help`(`cgmusic --help` 返回 `unsupported`)。参数错误时返回 `bad_input` 并打印该子命令的用法。
-
+- 渲染按声部并行:乐谱先拆为声部(钢琴双手为一个声部;MusicXML/MXL 由 cgscore 自动转换为声部,无需预处理),每个声部由原生合成核心 `cgsynth` 并行合成干声,再统一混音与母带处理。需要预处理时用 `cgmidi`(见上文:`process` 调速/移调/静音/改派,`hands` 双手,`pedal` 踏板,`bars` 小节)。
+- 参数错误时返回 `bad_input` 并打印该子命令的用法。
 - 输入:`.mid`、`.midi`、`.musicxml`、`.xml`、`.mxl`。输入文件不超过 32 MiB;MIDI 不超过 8 MiB;播放时长不超过 15 分钟(超出返回 `too_long`)。
 - `--soundfont ID|FILE`:音色 id,必须来自 `cgmusic soundfonts` 的列表。
 - `--font-for-channel CH=ID`:把某个 MIDI 通道(1–16)绑定到另一个音色,可重复。用于混合音色。
@@ -76,7 +76,7 @@ cgmusic 没有 `--help`(`cgmusic --help` 返回 `unsupported`)。参数错误时
 - **`-o` 的扩展名必须与 `--fmt` 一致。** 实测:`-o x.wav` 而不加 `--fmt wav` 写出的是 MP3 内容。最稳妥的做法是同时指定匹配的 `--fmt` 与后缀。
 - `-o OUT`:默认输出到 `/workspace/artifacts/music/`。
 - 声部电平是内置自动规则,**不能调整**(没有分声部增益参数)。
-- `render` 成功输出 JSON 的主要字段:`path`、`fmt`、`duration_s`、`midi_seconds`、`soundfont`、`lufs`、`true_peak_dbtp`、`lra`、`clipped`,以及 `balance`、`reverb`、`fonts`(含 `missing_presets`)、`fallbacks`。
+- `render` 成功输出 JSON 的主要字段:`path`、`fmt`、`duration_s`、`lufs`、`true_peak_dbtp`、`lra`、`clipped`、`balance`、`reverb`、`fonts`、`missing_presets`、`fallbacks`、`muse`,以及 `parts`(各声部的 id、name、engine、wall_s)与 `wall_s`。
 - `soundfonts` 返回 `{"dir": "/opt/soundfonts", "fonts": [{"id", "file", "bytes", "default", ...}]}`。`/opt/soundfonts` 只读且共享,不要尝试写入或下载音色。
 - `presets --soundfont ID` 返回 `{"soundfont", "file", "presets": [{"bank", "program", "name"}]}`。
 - 错误码:`bad_input`、`too_long`、`no_soundfont`、`synth_failed`、`bad_musicxml`、`unsupported`。把 `message` 告诉用户。`too_long` 时直接说明超长,不要自行拆分或重新编码。
@@ -124,7 +124,7 @@ cgdl musescore-get <url> --kind mid|mxl|mp3|pdf [-o DIR]
 4. **交付:** 用 `report_progress`,并设置 `files=[{"path": "/workspace/artifacts/music/<文件>", "send_as": "file"}]`。文件必须位于 `/workspace` 之下。`send_as` 只对音频有效:`"file"` 以文件发送(可保存),`"voice"` 以语音消息播放(有损且有时长上限)。用户要听语音消息选 `"voice"`,要拿到文件选 `"file"`;不明确时用一句话问用户后再发送。
 5. **报告要简短:** 时长(`duration_s`)、综合响度(`lufs`,目标为 -14 LUFS)、真峰值(`true_peak_dbtp`)与是否削波(`clipped`)。例如:"时长 2:31,响度 -14.0 LUFS,真峰值 -1.6 dBTP,未削波"。不要粘贴整段 JSON,也不要解释指标含义。
 6. 若 `clipped` 为 true,在报告中说明。只有用户想要时才提供更低 `--gain` 的渲染,不要自行重渲染。
-7. 若 `fonts` 中出现非空 `missing_presets`,或 `fallbacks` 非空,在报告中用一句话说明。
+7. 若 `missing_presets` 或 `fallbacks` 非空,在报告中用一句话说明。
 8. **MIDI 的混响 0 在 tick 0 视为未设置。** 文件中在 tick 0 写入的 CC91 为 0 时,会被当作未设置,由 cgmusic 自行决定。要明确指定混响发送为 0,使用 `--reverb CH=0`。
 9. 不要用 pip、apt 或下载方式安装合成器、插件或音色。上述工具已足够。
 10. **Musescore 个人使用提醒:** 每次抓取了 Musescore 文件后,在最终报告中提醒一次:乐谱仅供用户个人学习与试听,不得再分发,并请尊重作者与授权条款。

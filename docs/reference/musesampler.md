@@ -646,3 +646,29 @@ Muse 混音(干声 + 混响总线)→ **总线压缩** → 自动补偿增益 �
 
 - **无听感检查**:由于环境无扬声器/耳机物理输出,所有结论仅基于客观数据指标(RMS、LUFS、真峰值、LRA、音轨事件数),未进行主观听感验收。
 - **其他特殊打击乐音色**:仅在 `Drum Kit` 与 `GM Kit` 验证了映射与衰减,其他如 Taiko、Timpani 未单独听辨。
+
+## 23. 架构变更:C++ 精简为合成核心,预处理与后处理迁入 Python [已记录]
+
+本节为追加,不修改 §0–§22。
+
+- §0–§22 中的 `cgmusic` 指旧 C++ 二进制,现名 `cgsynth`(源码 `sandbox/tools/cgsynth/`);`cgmusic` 现指 Python 编排器(`sandbox/tools/cgmusic/`)。
+- 旧 `cgmusic muse-instruments` 已删除;旧 C++ 中的 MusicXML 解析与编码、平衡、混响发送、响度、混音子系统已从 C++ 移除(MusicXML 移植到 cgscore,混音与母带处理移至 cgmaster)。
+
+### 23.1 各部分去向
+
+- `cgsynth`(C++17,仅合成核心):`render <part.mid> --engine fluidsynth|muse [--soundfont ID|FILE] -o <stem.wav>`、`soundfonts`、`presets <file>`。输入为单声部标准 MIDI,输出该声部的干声 WAV。
+- 前处理(Python):`cgscore`(`prepare`:输入 `.mid`/`.musicxml`/`.mxl` → 每声部一个 MIDI 与 `plan.json`;MusicXML 解析与 SMF 编码见 `musicxml.py`,默认混音见 `defaults.py`)、`cgmidi`(MIDI 预处理:速度、移调、双手合并、踏板、小节等)。
+- 后处理(Python):`cgmaster`(`mix <plan.json> --stems <dir>`:声部混音与母带处理;响度与真峰值测量见 `quality.py`)。
+- 编排(Python):`cgmusic`(`render`:cgscore → 各声部并行 `cgsynth render` → cgmaster;`soundfonts`、`presets` 透传 cgsynth;`analyze` 调用 cgmaster 的测量)。
+
+### 23.2 Muse 逻辑所在位置
+
+- Muse 合成(C++,留在 cgsynth):`sandbox/tools/cgsynth/src/muse/` 的 `loader`、`render`、`catalog`、`abi.hpp`。
+- 按乐器名选择 Muse 乐器与默认混响发送在 Python 侧:`sandbox/tools/cgscore/src/cgscore/defaults.py`(`muse_name_for`、`default_mix`),结果写入 `plan.json` 的 `muse_name`、`engine_hint`、`mix`。
+- 残留(未在本次移除):`sandbox/tools/cgsynth/src/program_map.cpp` 与 `sandbox/tools/cgsynth/src/muse/mapping.{hpp,cpp}`(`pick_instrument`、`pick_instrument_by_name` 等乐器选择逻辑)仍在 C++ 侧。按"预处理归 Python"的约定,这两处应迁入 cgscore;是否迁移由 Main 决定。
+
+### 23.3 验证状态
+
+- 本节为文档记录,不含新的实测数据。
+- 未构建镜像;Dockerfile 仅做读检。镜像构建与端到端渲染待主线验证。
+
