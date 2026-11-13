@@ -552,3 +552,97 @@ Muse 混音(干声 + 混响总线)→ **总线压缩** → 自动补偿增益 �
 - 未与 FluidSynth 路径做同曲 A/B(该路径按设计保持不变)。
 - 未测处理耗时(压缩与限制均为线性复杂度,相对 Muse 渲染可忽略,但未实测)。
 - 前瞻限制 + 迭代真峰值级是否仍会在极端素材上抬高失真,未测。
+
+## 22. MusicXML 声部保真、乐器按名映射、拨奏与打击乐平衡 [已验证 / 未听感验收]
+
+更新日期:2026-11-13。本节为追加,不修改 §0–§21。
+
+### 22.1 缺陷诊断总结
+
+对 `pm.musicxml`(Parasailing Minigame)渲染的真实排查确认:
+1. **长笛消失与声部碰撞**:MusicXML 包含 19 个声部,而标准 SMF 仅有 16 个 MIDI 通道。旧代码经 `assign_channels` 分配后,第 17 声部(Violas)与第 18 声部(Violoncellos)回绕复用了通道 0(Flute 1)与通道 1(Flute 2)。`midi.cpp` 解析 SMF 时按通道归并事件,排在后面的弦乐 Program Change(48)覆盖了长笛的 Program Change(73),导致通道 0 和 1 被判定为 Violins 1,长笛音符混入弦乐,长笛轨完全消失。
+2. **乐器音色退化**:旧选择逻辑仅依据 GM 程序号。GM 40–51 均归入 `Violins 1`,GM 71 归入 `Clarinet in Bb`。因此 Violas、Cellos、Contrabasses 均被选为 `Violins 1`,Bass Clarinet 被选为 `Clarinet in Bb`,导致渲染报告中出现 `Violins 1 x5`、`Clarinet in Bb x3`。
+3. **鼓声严重过响**:旧架构中 -12 dB 衰减(`kFallbackGain`)仅应用于 FluidSynth 回退通道干声;Muse 的 `Drum Kit`(id 178)被作为 Muse 采样干声以 0 dB 偏移直接送入混音器。实测 Drum Kit 干声 RMS 高达 -15.56 dBFS,远高于管弦乐干声(-30 ~ -36 dBFS),严重压过管弦乐。
+4. **拨奏未支持**:旧逻辑仅在 GM 程序号为 45 时设置 `kArticulationPizzicato`,无法响应 MusicXML 中的记号。
+5. **目录前导空格**:`.instruments` 库中 ` Violins 1` 含有前导空格,必须在 loader 层全部 trim。
+
+### 22.2 代码变更
+
+1. **`MidiEvent` 虚拟通道与 `musicxml_to_sequence`**:
+   - `MidiEvent` 扩展 `int channel` 字段(默认取 `status & 0x0F`,可超出 0–15)。
+   - 新增 `musicxml_to_sequence` 接口,直接由 MusicXML 内存声部建立速度表与时间序列,每个声部获得独立虚拟通道索引(0..18),彻底解耦 16 通道限制;默认 FluidSynth 路径仍走 `musicxml_to_midi` 生成标准 SMF 字节流,保证完全逐位一致。
+2. **声部名称优先的乐器选择(`pick_instrument_by_name`)**:
+   - 声部名称作为选择 Muse 乐器的主键,支持多声部递增(首个 Flute 使用 `Flute 1`,第二个使用 `Flute 2`;首个 Violins 使用 `Violins 1`,第二个使用 `Violins 2`)。
+   - 明确映射表:
+     - Flute -> Flute 1 / Flute 2
+     - Clarinet -> Clarinet in Bb
+     - Bass Clarinet -> Bass Clarinet
+     - Bassoon -> Bassoon
+     - Horn -> French Horn
+     - Trumpet -> Trumpet
+     - Violins -> Violins 1 / Violins 2
+     - Violas -> Violas
+     - Violoncellos -> Cellos
+     - Contrabasses / Basses -> Contrabasses
+     - Accordion -> 显式回退 FluidSynth(`nullopt`)
+     - Drum Kit / Percussion -> Drum Kit
+   - 纯 MIDI 输入无声部名时自动回退到 GM 程序号查找。
+3. **音符级拨奏(Pizzicato)关节支持**:
+   - 解析 MusicXML 中的 `<notations><technical><pizzicato/>`、`<direction><direction-type><words>pizz.</words>` 与 `<sound pizzicato="yes|no"/>`,维护声部当前状态,生成时间戳切换事件。
+   - 在 `plan_channels` 中逐音符设置 `abi::kArticulationPizzicato`(arco 恢复 `kArticulationNone`)。
+   - Muse Strings 家族全部弦乐(小提琴、中提琴、大提琴、低音提琴及独奏)均原生支持拨奏;对不支持拨奏的管乐/键盘,MuseSampler 库忽略该关节位并按默认正常音色发音。
+4. **打击乐 -12 dB 衰减与干声 RMS**:
+   - 在 `mix_hybrid` 中对 `percussion` 家族(含 Drum Kit 及打击乐)施加与回退通道相同的 `kFallbackGain`(-12 dB),拉平动态平衡。
+   - 为每个干声计算立体声加权 RMS,并在输出 JSON 的 `muse.tracks[].rms_dbfs` 暴露。
+
+### 22.3 真实渲染结果:pm.musicxml (19 个声部)
+
+使用 §18/§19 容器配方(`home-run5` 只读挂载未做修改),二进制 `mscore-cgmusic` 真实渲染 `/home/klp/.cache/tmp/mab/pm.musicxml`:
+- **Exit code**: `0`
+- **时长**: 91.88 s(MIDI 90.0 s)
+- **积分响度**: `-14.00 LUFS`
+- **真实峰值**: `-1.97 dBTP`(≤ -1.5 dBTP)
+- **LRA**: `4.41`
+- **削波**: `false`
+- **墙钟总耗时**: `108.60 s`(干声渲染 `85.42 s`)
+
+#### 19 声部映射与实测干声 RMS 对照表
+
+| 声部通道 | 乐谱声部名 | 乐器 ID | 选定乐器名 | 乐器家族 | 音符数 | 干声 RMS (dBFS) | 渲染方式 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 1 | Flute | 118 | Flute 1 | woodwinds | 130 | -34.76 | Muse 采样器 |
+| 2 | Flute | 119 | Flute 2 | woodwinds | 132 | -30.93 | Muse 采样器 |
+| 3 | Clarinet | 127 | Clarinet in Bb | woodwinds | 190 | -34.30 | Muse 采样器 |
+| 4 | Clarinet | 127 | Clarinet in Bb | woodwinds | 190 | -34.66 | Muse 采样器 |
+| 5 | Bass Clarinet | 128 | Bass Clarinet | woodwinds | 190 | -33.14 | Muse 采样器 |
+| 6 | Bassoon | 133 | Bassoon | woodwinds | 118 | -36.42 | Muse 采样器 |
+| 7 | Horn | 108 | French Horn | brass | 20 | -33.43 | Muse 采样器 |
+| 8 | Horn | 108 | French Horn | brass | 14 | -34.70 | Muse 采样器 |
+| 9 | Trumpet | 110 | Trumpet | brass | 108 | -33.18 | Muse 采样器 |
+| 10 | Trumpet | 110 | Trumpet | brass | 16 | -36.43 | Muse 采样器 |
+| 11 | Drum Kit | 178 | Drum Kit | percussion | 537 | -15.56 | Muse 采样器 (-12 dB 衰减后混音) |
+| 12 | Percussion | 178 | Drum Kit | percussion | 6 | -120.00 | Muse 采样器 (-12 dB 衰减后混音) |
+| 13 | Accordion | — | (SoundFont) | keys | 100 | -23.12 | FluidSynth 回退 (预衰减 -12 dB) |
+| 14 | Piano | 167 | Piano | keys | 566 | -20.40 | Muse 采样器 |
+| 15 | Violins | 91 | Violins 1 | strings | 174 | -24.01 | Muse 采样器 |
+| 16 | Violins | 92 | Violins 2 | strings | 164 | -28.08 | Muse 采样器 |
+| 17 | Violas | 93 | Violas | strings | 132 | -33.14 | Muse 采样器 |
+| 18 | Violoncellos | 94 | Cellos | strings | 190 | -24.72 | Muse 采样器 |
+| 19 | Contrabasses | 95 | Contrabasses | strings | 190 | -23.62 | Muse 采样器 |
+
+**鼓组电平改善分析**:
+- 鼓组干声实测 RMS 为 `-15.56 dBFS`,在管弦乐总线中如果不做预衰减,能量比长笛/单簧管高出近 19 dB,导致严重喧宾夺主。
+- 施加 -12 dB 预衰减后,鼓组实际进入母带的电平相对下降 12 dB,与其他声部达到声学均衡。
+
+### 22.4 离线单元测试
+
+`tests/test_muse_render.cpp` 新增 4 项离线单元测试(`ctest` 全部通过,共 102 项测试):
+1. `muse_part_name_mapping_covers_orchestra_and_fallbacks`:验证全部 19 类乐器关键词到精确 Muse 乐器 ID 的映射、二次出现的自动递增(Flute 1/2, Violins 1/2)及手风琴回退。
+2. `muse_two_parts_sharing_xml_channel_stay_separate`:构造共用 XML midi-channel 1 的两声部乐谱(Flute 与 Violas),断言 `musicxml_to_sequence` 保持两者独立(虚拟通道 0 与 1),`plan_channels` 分别选出 Flute 1 与 Violas,且 SMF 路径正常。
+3. `muse_synthetic_pizzicato_arco_ranges`:构造合成乐谱,依次演奏 arco -> pizz. -> arco 三个音符,断言关节位精准设置为 `kArticulationNone` -> `kArticulationPizzicato` -> `kArticulationNone`。
+4. `muse_drum_trim_only_applied_to_percussion_stems`:合成非静音 Brass 与 Percussion 干声,断言打击乐家族受 -12 dB 衰减,且两者 RMS 准确记录于输出报告。
+
+### 22.5 未验证
+
+- **无听感检查**:由于环境无扬声器/耳机物理输出,所有结论仅基于客观数据指标(RMS、LUFS、真峰值、LRA、音轨事件数),未进行主观听感验收。
+- **其他特殊打击乐音色**:仅在 `Drum Kit` 与 `GM Kit` 验证了映射与衰减,其他如 Taiko、Timpani 未单独听辨。
