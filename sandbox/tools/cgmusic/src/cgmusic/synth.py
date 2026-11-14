@@ -16,6 +16,8 @@ from typing import Any
 from cgmusic.errors import MUSE_UNAVAILABLE, SYNTH_FAILED, CgmusicError, from_cgsynth_stderr
 
 BIN_ENV = "CGSYNTH_BIN"
+MUSE_BIN_ENV = "CGSYNTH_MUSE_BIN"
+MUSE_HOME_ENV = "CGMUSIC_MUSE_HOME"
 
 
 @dataclass(frozen=True)
@@ -23,6 +25,7 @@ class RenderCall:
     key: str
     argv: list[str]
     fallback_argv: list[str] | None = None
+    env: dict[str, str] | None = None
 
 
 @dataclass(frozen=True)
@@ -38,15 +41,29 @@ class _Cancelled(Exception):
 
 
 def locate() -> str:
-    override = os.environ.get(BIN_ENV)
+    return _locate(BIN_ENV, "cgsynth")
+
+
+def locate_muse() -> str:
+    return _locate(MUSE_BIN_ENV, "mscore-cgsynth")
+
+
+def _locate(env: str, name: str) -> str:
+    override = os.environ.get(env)
     if override:
         if not (Path(override).is_file() and os.access(override, os.X_OK)):
-            raise CgmusicError(SYNTH_FAILED, f"{BIN_ENV} 不是可执行文件: {override}")
+            raise CgmusicError(SYNTH_FAILED, f"{env} 不是可执行文件: {override}")
         return override
-    found = shutil.which("cgsynth")
+    found = shutil.which(name)
     if found is None:
-        raise CgmusicError(SYNTH_FAILED, f"找不到 cgsynth: 请加入 PATH 或设置 {BIN_ENV}")
+        raise CgmusicError(SYNTH_FAILED, f"找不到 {name}: 请加入 PATH 或设置 {env}")
     return found
+
+
+def muse_environment() -> dict[str, str] | None:
+    """仅设置 Muse 子进程使用的 HOME;未配置时不改变现有环境。"""
+    home = os.environ.get(MUSE_HOME_ENV)
+    return {"HOME": home} if home else None
 
 
 def parse_stdout(text: str) -> dict[str, Any]:
@@ -85,13 +102,17 @@ class _Group:
         for proc in live:
             proc.kill()
 
-    def _execute(self, argv: list[str]) -> tuple[str, str]:
+    def _execute(self, argv: list[str], env: dict[str, str] | None = None) -> tuple[str, str]:
         with self._lock:
             if self._cancelled:
                 raise _Cancelled
             try:
                 proc = subprocess.Popen(
-                    argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, encoding="utf-8"
+                    argv,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    encoding="utf-8",
+                    env={**os.environ, **env} if env is not None else None,
                 )
             except OSError as exc:
                 raise CgmusicError(SYNTH_FAILED, f"无法启动 cgsynth: {exc}") from exc
@@ -112,7 +133,7 @@ class _Group:
     def run(self, call: RenderCall) -> RenderResult:
         started = time.monotonic()
         try:
-            stdout, _ = self._execute(call.argv)
+            stdout, _ = self._execute(call.argv, call.env)
             return RenderResult(parse_stdout(stdout), round(time.monotonic() - started, 3))
         except CgmusicError as exc:
             if call.fallback_argv is not None and exc.code == MUSE_UNAVAILABLE:

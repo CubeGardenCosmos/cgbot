@@ -50,12 +50,11 @@ uv sync            # 或离线场景使用 uv run --offline
 uv run cgmusic --help   # 与旧 C++ CLI 一致:不支持 --help,返回 unsupported
 ```
 
-`cgsynth` 通过以下方式定位:
+FluidSynth 合成使用 `CGSYNTH_BIN` 指定的可执行文件(优先),否则在 `PATH` 中查找 `cgsynth`;找不到时返回 `synth_failed`。`presets`、`soundfonts` 以及 Muse 不可用后的 FluidSynth 回退也使用这个二进制。
 
-- 环境变量 `CGSYNTH_BIN`:指向可执行文件的绝对路径(优先);
-- 否则在 `PATH` 中查找 `cgsynth`。
+Muse 声部使用 `CGSYNTH_MUSE_BIN` 指定的可执行文件(优先),否则在 `PATH` 中查找 `mscore-cgsynth`。镜像内的 `mscore-cgsynth` 是 `cgsynth` 的实体副本;MuseSampler 要求 `mscore-*` 宿主进程名,不能用符号链接替代。仅 Muse 子进程在设置了 `CGMUSIC_MUSE_HOME` 时使用该值作为 `HOME`(部署中为只读挂载的 `/opt/muse-home`);FluidSynth 子进程保持编排器的原 `HOME`。
 
-找不到时返回 `synth_failed`。
+Muse 库与样本由 `MUSESAMPLER_LIB` 和 `MUSE_SAMPLES_DIR` 指定,部署时分别指向只读挂载的 `/opt/musesampler/lib/libMuseSamplerCoreLib.so` 与 `/opt/muse-sounds`。库、样本、receipt 与 machine-id 均由宿主机只读挂载,不进入镜像或仓库;`/var/lib/MuseSampler/.config` 等需要写入的路径使用容器内临时可写目录。Muse 环境未挂载时仍按现有流程返回 `muse_unavailable`,逐声部回退到 FluidSynth。
 
 音色目录由 `cgsynth` 读取:环境变量 `CGMUSIC_SOUNDFONTS`,默认 `/opt/soundfonts`。
 

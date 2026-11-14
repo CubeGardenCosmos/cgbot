@@ -59,7 +59,15 @@ def render(args: list[str]) -> int:
         return fail("bad_input", "render needs --engine and -o")
     part = out.stem
     resolved = None if engine == "muse" else (soundfont or "GM")
-    log("start", part=part, engine=engine, soundfont=resolved, argv=args)
+    log(
+        "start",
+        part=part,
+        engine=engine,
+        soundfont=resolved,
+        argv=args,
+        binary=os.environ.get("FAKE_CGSYNTH_BINARY"),
+        home=os.environ.get("HOME"),
+    )
     raw_targets = os.environ.get("FAKE_CGSYNTH_FAIL", "")
     fail_targets = [p.strip() for p in raw_targets.split(",") if p.strip()]
     fail_engine = os.environ.get("FAKE_CGSYNTH_FAIL_ENGINE")

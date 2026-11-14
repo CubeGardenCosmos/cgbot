@@ -94,7 +94,9 @@ RUN python3 -m pip install --no-cache-dir --no-deps /opt/cgbot/tools/cgmidi \
 
 # cgsynth:由 cgsynth-build 阶段编译的原生合成核心(仅 FluidSynth / MuseSampler 合成);运行库在上面的 apt 层安装。
 COPY --from=cgsynth-build /out/cgsynth /usr/local/bin/cgsynth
-RUN ! ldd /usr/local/bin/cgsynth | grep -q 'not found'
+# MuseSampler 要求 mscore-* 宿主进程名;实体副本同时保证 argv[0]、comm 与可执行文件名正确。
+RUN cp /usr/local/bin/cgsynth /usr/local/bin/mscore-cgsynth \
+    && ! ldd /usr/local/bin/cgsynth /usr/local/bin/mscore-cgsynth | grep -q 'not found'
 
 # Python 工具(cgscore 前处理、cgmaster 后处理、cgmusic 编排),与 cgmidi 相同方式安装;依赖由 requirements.txt 提供。
 COPY tools/cgscore /opt/cgbot/tools/cgscore
@@ -110,7 +112,7 @@ RUN python3 -m pip install --no-cache-dir --no-deps /opt/cgbot/tools/cgmaster \
 COPY tools/cgmusic /opt/cgbot/tools/cgmusic
 RUN python3 -m pip install --no-cache-dir --no-deps /opt/cgbot/tools/cgmusic \
     && ln -sf "$(python3 -c 'import sysconfig; print(sysconfig.get_path("scripts"))')/cgmusic" /usr/local/bin/cgmusic \
-    && cgmusic --help >/dev/null
+    && python3 -c 'import cgmusic.cli' && test -x /usr/local/bin/cgmusic
 
 
 COPY tools/richdoc /opt/cgbot/tools/richdoc

@@ -55,15 +55,24 @@ def render(opts: RenderOptions) -> dict[str, Any]:
         save_plan(plan_path, doc)
         stems = work / "stems"
         stems.mkdir()
+        muse_binary = (
+            synth.locate_muse() if any(task.engine == "muse" for task in tasks) else binary
+        )
         calls = [
             synth.RenderCall(
                 key=task.id,
-                argv=_render_argv(binary, plan_dir / task.file, task, stems / f"{task.id}.wav"),
+                argv=_render_argv(
+                    muse_binary if task.engine == "muse" else binary,
+                    plan_dir / task.file,
+                    task,
+                    stems / f"{task.id}.wav",
+                ),
                 fallback_argv=_fallback_argv(
                     binary, plan_dir / task.file, task, stems / f"{task.id}.wav", opts
                 )
                 if task.engine == "muse"
                 else None,
+                env=synth.muse_environment() if task.engine == "muse" else None,
             )
             for task in tasks
         ]

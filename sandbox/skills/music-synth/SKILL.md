@@ -65,6 +65,7 @@ cgmusic analyze <audio>
 ```
 
 - 渲染按声部并行:乐谱先拆为声部(钢琴双手为一个声部;MusicXML/MXL 由 cgscore 自动转换为声部,无需预处理),每个声部由原生合成核心 `cgsynth` 并行合成干声,再统一混音与母带处理。需要预处理时用 `cgmidi`(见上文:`process` 调速/移调/静音/改派,`hands` 双手,`pedal` 踏板,`bars` 小节)。
+- 部署挂载 Muse Sounds 时,用 `cgmusic render <file> --engine muse` 选择 Muse 合成;不可用的声部按报告回退到 FluidSynth。
 - 参数错误时返回 `bad_input` 并打印该子命令的用法。
 - 输入:`.mid`、`.midi`、`.musicxml`、`.xml`、`.mxl`。输入文件不超过 32 MiB;MIDI 不超过 8 MiB;播放时长不超过 15 分钟(超出返回 `too_long`)。
 - `--soundfont ID|FILE`:音色 id,必须来自 `cgmusic soundfonts` 的列表。

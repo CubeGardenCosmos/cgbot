@@ -17,6 +17,7 @@ FAKE_PY = Path(__file__).with_name("fake_cgsynth.py")
 @dataclass
 class FakeCgsynth:
     binary: Path
+    muse_binary: Path
     log: Path
 
     def events(self) -> list[dict[str, Any]]:
@@ -56,11 +57,22 @@ def fake_cgsynth(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> FakeCgsynth
             monkeypatch.delenv(key, raising=False)
     bindir = tmp_path / "bin"
     bindir.mkdir()
-    binary = bindir / "cgsynth"
-    binary.write_text(f'#!/bin/sh\nexec "{sys.executable}" "{FAKE_PY}" "$@"\n', encoding="utf-8")
-    binary.chmod(0o755)
+    binary = _fake_binary(bindir / "cgsynth")
+    muse_binary = _fake_binary(bindir / "mscore-cgsynth")
     log = tmp_path / "fake-cgsynth.log"
     log.touch()
     monkeypatch.setenv("CGSYNTH_BIN", str(binary))
+    monkeypatch.setenv("CGSYNTH_MUSE_BIN", str(muse_binary))
+    monkeypatch.delenv("CGMUSIC_MUSE_HOME", raising=False)
     monkeypatch.setenv("FAKE_CGSYNTH_LOG", str(log))
-    return FakeCgsynth(binary=binary, log=log)
+    return FakeCgsynth(binary=binary, muse_binary=muse_binary, log=log)
+
+
+def _fake_binary(path: Path) -> Path:
+    path.write_text(
+        f'#!/bin/sh\nexport FAKE_CGSYNTH_BINARY="{path}"\n'
+        f'exec "{sys.executable}" "{FAKE_PY}" "$@"\n',
+        encoding="utf-8",
+    )
+    path.chmod(0o755)
+    return path

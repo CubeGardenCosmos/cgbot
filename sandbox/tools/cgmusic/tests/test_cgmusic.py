@@ -50,6 +50,74 @@ def test_single_part_render_reports_all_keys(tmp_path, tmp_base, fake_cgsynth, c
     assert list(tmp_base.iterdir()) == []
 
 
+def test_muse_uses_dedicated_binary_and_home(
+    tmp_path, tmp_base, fake_cgsynth, monkeypatch, capsys
+):
+    mid = write_midi(tmp_path / "muse-home.mid")
+    monkeypatch.setenv("HOME", "/parent-home")
+    monkeypatch.setenv("CGMUSIC_MUSE_HOME", "/mounted-muse-home")
+    code, _, err = run_cli(
+        ["render", str(mid), "--engine", "muse", "--fmt", "wav", "-o", str(tmp_path / "o.wav")],
+        capsys,
+    )
+    assert code == 0, err
+    [call] = fake_cgsynth.calls()
+    assert call["binary"] == str(fake_cgsynth.muse_binary)
+    assert call["home"] == "/mounted-muse-home"
+
+
+def test_fluidsynth_ignores_muse_binary_and_home(
+    tmp_path, tmp_base, fake_cgsynth, monkeypatch, capsys
+):
+    mid = write_midi(tmp_path / "fluid-home.mid")
+    monkeypatch.setenv("HOME", "/parent-home")
+    monkeypatch.setenv("CGMUSIC_MUSE_HOME", "/mounted-muse-home")
+    code, _, err = run_cli(
+        ["render", str(mid), "--fmt", "wav", "-o", str(tmp_path / "o.wav")], capsys
+    )
+    assert code == 0, err
+    [call] = fake_cgsynth.calls()
+    assert call["binary"] == str(fake_cgsynth.binary)
+    assert call["home"] == "/parent-home"
+
+
+def test_muse_without_home_override_preserves_parent_home(
+    tmp_path, tmp_base, fake_cgsynth, monkeypatch, capsys
+):
+    mid = write_midi(tmp_path / "muse-default-home.mid")
+    monkeypatch.setenv("HOME", "/parent-home")
+    monkeypatch.delenv("CGMUSIC_MUSE_HOME", raising=False)
+    code, _, err = run_cli(
+        ["render", str(mid), "--engine", "muse", "--fmt", "wav", "-o", str(tmp_path / "o.wav")],
+        capsys,
+    )
+    assert code == 0, err
+    [call] = fake_cgsynth.calls()
+    assert call["binary"] == str(fake_cgsynth.muse_binary)
+    assert call["home"] == "/parent-home"
+
+
+def test_muse_fallback_restores_fluidsynth_binary_and_home(
+    tmp_path, tmp_base, fake_cgsynth, monkeypatch, capsys
+):
+    mid = write_midi(tmp_path / "muse-fallback-home.mid")
+    monkeypatch.setenv("HOME", "/parent-home")
+    monkeypatch.setenv("CGMUSIC_MUSE_HOME", "/mounted-muse-home")
+    monkeypatch.setenv("FAKE_CGSYNTH_FAIL", "ALL")
+    monkeypatch.setenv("FAKE_CGSYNTH_FAIL_ENGINE", "muse")
+    monkeypatch.setenv("FAKE_CGSYNTH_FAIL_CODE", "muse_unavailable")
+    code, _, err = run_cli(
+        ["render", str(mid), "--engine", "muse", "--fmt", "wav", "-o", str(tmp_path / "o.wav")],
+        capsys,
+    )
+    assert code == 1 and err["error"] == "muse_unavailable"
+    calls = {call["engine"]: call for call in fake_cgsynth.calls()}
+    assert calls["muse"]["binary"] == str(fake_cgsynth.muse_binary)
+    assert calls["muse"]["home"] == "/mounted-muse-home"
+    assert calls["fluidsynth"]["binary"] == str(fake_cgsynth.binary)
+    assert calls["fluidsynth"]["home"] == "/parent-home"
+
+
 def test_parts_render_in_parallel(tmp_path, tmp_base, fake_cgsynth, monkeypatch, capsys):
     mid = write_midi(tmp_path / "multi.mid", channels=(0, 1, 2))
     monkeypatch.setenv("FAKE_CGSYNTH_SLEEP", "1.0")
