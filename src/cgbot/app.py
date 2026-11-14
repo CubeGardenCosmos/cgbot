@@ -334,6 +334,7 @@ class App:
                 search_service=self._search,
                 gemini_client=self._coding_gemini,
                 soundfont_dir=config.music.soundfont_dir if config.music.enabled else None,
+                muse_dir=config.music.muse_dir,
                 timebase=timebase,
             )
             if config.coding is not None

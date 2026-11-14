@@ -20,6 +20,7 @@ def test_music_defaults_off_and_dir_under_host_data(tmp_path: Path) -> None:
     assert music.skill_ttl_seconds == 3600.0
     assert music.musescore_enabled is True
     assert music.soundfont_dir == tmp_path / "host-data" / "soundfonts"
+    assert music.muse_dir is None
 
 
 def test_music_default_dir_without_coding_uses_data_dir(tmp_path: Path) -> None:
@@ -31,12 +32,14 @@ def test_music_default_dir_without_coding_uses_data_dir(tmp_path: Path) -> None:
 def test_music_explicit_values_and_relative_dir(tmp_path: Path) -> None:
     config = music_config(
         tmp_path,
-        '[music]\nenabled = true\nsoundfont_dir = "fonts"\nauto_download_soundfont = false\n'
+        '[music]\nenabled = true\nsoundfont_dir = "fonts"\nmuse_dir = "muse"\n'
+        "auto_download_soundfont = false\n"
         "auto_render_files = false\nmax_file_bytes = 1024\nskill_ttl_seconds = 60\n"
         "musescore_enabled = false\n",
     )
     music = config.music
     assert music.soundfont_dir == tmp_path / "fonts"
+    assert music.muse_dir == tmp_path / "muse"
     assert not music.auto_download_soundfont
     assert not music.auto_render_files
     assert music.max_file_bytes == 1024
@@ -52,6 +55,7 @@ def test_music_explicit_values_and_relative_dir(tmp_path: Path) -> None:
         ("skill_ttl_seconds = -1", "music.skill_ttl_seconds"),
         ("unknown = true", "music.unknown"),
         ('soundfont_dir = ""', "music.soundfont_dir"),
+        ('muse_dir = ""', "music.muse_dir"),
     ],
 )
 def test_music_invalid_values_name_the_key(tmp_path: Path, body: str, key: str) -> None:

@@ -117,12 +117,13 @@ def load_config(
 
 
 def _music(t: _Table, base_dir: Path, default_soundfonts: Path) -> MusicConfig:
-    """``[music]``: 默认关闭;``soundfont_dir`` 相对路径按配置文件目录解析。"""
+    """``[music]``: 默认关闭;相对宿主机路径按配置文件目录解析。"""
     defaults = MusicConfig()
     enabled = t.bool_or("enabled", defaults.enabled)
     soundfont_dir = (
         t.path_under("soundfont_dir", base_dir) if t.has("soundfont_dir") else default_soundfonts
     )
+    muse_dir = t.path_under("muse_dir", base_dir) if t.has("muse_dir") else None
     auto_download = t.bool_or("auto_download_soundfont", defaults.auto_download_soundfont)
     auto_render = t.bool_or("auto_render_files", defaults.auto_render_files)
     max_file_bytes = t.positive_int_or("max_file_bytes", defaults.max_file_bytes)
@@ -132,6 +133,7 @@ def _music(t: _Table, base_dir: Path, default_soundfonts: Path) -> MusicConfig:
     return MusicConfig(
         enabled=enabled,
         soundfont_dir=soundfont_dir,
+        muse_dir=muse_dir,
         auto_download_soundfont=auto_download,
         auto_render_files=auto_render,
         max_file_bytes=max_file_bytes,

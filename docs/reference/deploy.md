@@ -87,6 +87,20 @@ ssh "$CGBOT_HOST" 'docker build -t cgbot-sandbox:latest "$HOME/cgbot-build/sandb
 
 **音乐合成(`[music] enabled = true`)**:音色目录默认 `$CGBOT_HOST_DATA_DIR/soundfonts`(默认 `$HOME/cgbot-data/soundfonts`),bot 已把 `CGBOT_HOST_DATA_DIR` 以相同路径读写挂入容器,启动时自动创建并后台下载默认音色(约 38 MiB,经 bot 容器出站;失败只记日志,可用 `scripts/fetch_soundfonts.py --dir <目录>` 在宿主机手工补)。`deploy.sh --up` 重建 bot 后,空闲沙盒因挂载进入配置哈希而在下次使用时自动重建为新镜像;若沙盒正在运行,需待其空闲回收或 `docker stop cgbot-sbx-<id>`。详见 [soundfonts.md](soundfonts.md)。
 
+**Muse Sounds(可选)**:`[music] muse_dir` 指定宿主机目录,相对路径按 `config.toml` 所在目录解析;缺省不启用 Muse 挂载,也不要求 `enabled = true`。沙盒镜像不包含专有库或样本;用户自行从官方安装准备以下固定布局(示例值为 192.168.1.19 上的 `/home/klp/muse-sounds`,不得把库、样本或收据放进仓库):
+
+```text
+<muse_dir>/
+├── Muse Hub Instruments/       # 含 .instruments 的样本根
+├── MuseSampler/lib/
+│   └── libMuseSamplerCoreLib.so
+├── home/                       # 用户官方生成的 HOME 状态
+│   └── .local/share/muse-sounds-manager/.receipt
+└── machine-id                  # 与该 receipt 匹配的固定标识文件
+```
+
+四项路径都存在且类型正确时,bot 才把它们分别只读挂载为沙盒 `/opt/muse-sounds`、`/opt/musesampler/lib`、`/opt/muse-home`、`/etc/machine-id`,并设置 `MUSESAMPLER_LIB`、`MUSE_SAMPLES_DIR`、`CGMUSIC_MUSE_HOME`;任一项缺失则整组不挂载,INFO 日志列出缺失路径。`.receipt` 与 `machine-id` 是用户提供的敏感安装材料,只描述位置,不记录或提交其内容。MuseSampler 所需的 `/var/lib/MuseSampler/.config` 由沙盒内临时可写目录提供,不回写这些宿主机目录。挂载组与环境进入沙盒配置哈希,变更后空闲沙盒下次使用时自动重建。
+
 预期:`docker image inspect cgbot-sandbox:latest` 成功。失败:包镜像源不可达时按 [sandbox-image.md](sandbox-image.md) 调整 `ENV`。
 
 ### 3.5 写入 config.toml 与 secrets.toml

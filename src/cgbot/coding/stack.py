@@ -52,12 +52,15 @@ class CodingStack:
         search_service: SearchService | None = None,
         gemini_client: GeminiSearchClient | None = None,
         soundfont_dir: Path | None = None,
+        muse_dir: Path | None = None,
         timebase: Timebase | None = None,
     ) -> None:
         auth = HmacSandboxAuth(config.token_secret)
         self._governor = ConcurrencyGovernor(config.concurrency, clock)
         self._store = QueueStore(queue_path)
-        self._sandbox = DockerSandboxProvider(config, auth, soundfont_dir=soundfont_dir)
+        self._sandbox = DockerSandboxProvider(
+            config, auth, soundfont_dir=soundfont_dir, muse_dir=muse_dir
+        )
         self._manager = CodingManager(
             self._sandbox,
             connect_codex,

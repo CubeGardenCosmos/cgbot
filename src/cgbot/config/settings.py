@@ -256,6 +256,7 @@ class MusicConfig:
 
     enabled: bool = False
     soundfont_dir: Path = Path("data/soundfonts")
+    muse_dir: Path | None = None  # 可选的宿主机 Muse Sounds 目录;缺省不挂载
     auto_download_soundfont: bool = True  # 启动时后台确保默认音色(失败只记日志)
     auto_render_files: bool = True  # 私聊收到乐谱文件后自动提交一次渲染任务
     max_file_bytes: int = 8 * 1024 * 1024

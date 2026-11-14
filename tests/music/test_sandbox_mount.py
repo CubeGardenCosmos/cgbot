@@ -9,30 +9,62 @@ import pytest
 from music_fakes import music_config
 
 from cgbot.coding.auth import HmacSandboxAuth
-from cgbot.coding.sandbox import SOUNDFONT_MOUNT, DockerSandboxProvider
+from cgbot.coding.sandbox import (
+    MUSE_ENV,
+    MUSE_HOME_MOUNT,
+    MUSE_LIBRARY_MOUNT,
+    MUSE_SAMPLES_MOUNT,
+    SOUNDFONT_MOUNT,
+    DockerSandboxProvider,
+)
 from cgbot.config.settings import MusicConfig
 from cgbot.music.errors import MusicError
 from cgbot.music.soundfont import SoundfontStore
 from cgbot.music.startup import ensure_default_soundfont, prepare_soundfont_dir
 
 
-async def _binds(tmp_path: Path, soundfont_dir: Path | None) -> tuple[list[str], str]:
+async def _sandbox_spec(
+    tmp_path: Path,
+    soundfont_dir: Path | None = None,
+    muse_dir: Path | None = None,
+) -> tuple[list[str], str, dict[str, str]]:
     config = music_config(tmp_path)
     assert config.coding is not None
     provider = DockerSandboxProvider(
-        config.coding, HmacSandboxAuth(config.coding.token_secret), soundfont_dir=soundfont_dir
+        config.coding,
+        HmacSandboxAuth(config.coding.token_secret),
+        soundfont_dir=soundfont_dir,
+        muse_dir=muse_dir,
     )
     try:
         body = provider._desired_body("u1", "ws-token")
-        return list(body["HostConfig"]["Binds"]), provider._config_hash(body)
+        env = dict(item.split("=", 1) for item in body["Env"])
+        return list(body["HostConfig"]["Binds"]), provider._config_hash(body), env
     finally:
         await provider.close()
+
+
+def _muse_layout(root: Path, *, omit: str | None = None) -> None:
+    paths = (
+        ("Muse Hub Instruments", True),
+        ("MuseSampler/lib", True),
+        ("home", True),
+        ("machine-id", False),
+    )
+    for name, is_dir in paths:
+        if name == omit:
+            continue
+        path = root / name
+        if is_dir:
+            path.mkdir(parents=True, exist_ok=True)
+        else:
+            path.write_text("test-machine-id", encoding="utf-8")
 
 
 async def test_bind_added_read_only_when_dir_exists(tmp_path: Path) -> None:
     fonts = tmp_path / "fonts"
     fonts.mkdir()
-    binds, _ = await _binds(tmp_path, fonts)
+    binds, _, _ = await _sandbox_spec(tmp_path, fonts)
     assert f"{fonts}:{SOUNDFONT_MOUNT}:ro" in binds
     assert SOUNDFONT_MOUNT == "/opt/soundfonts"
     assert len(binds) == 3
@@ -40,14 +72,14 @@ async def test_bind_added_read_only_when_dir_exists(tmp_path: Path) -> None:
 
 
 async def test_no_bind_when_not_configured_or_missing(tmp_path: Path) -> None:
-    unconfigured, plain_hash = await _binds(tmp_path, None)
-    missing, _ = await _binds(tmp_path, tmp_path / "absent")
+    unconfigured, plain_hash, _ = await _sandbox_spec(tmp_path)
+    missing, _, _ = await _sandbox_spec(tmp_path, tmp_path / "absent")
     assert len(unconfigured) == 2
     assert missing == unconfigured
     assert not any(SOUNDFONT_MOUNT in bind for bind in unconfigured)
     fonts = tmp_path / "fonts"
     fonts.mkdir()
-    _, mounted_hash = await _binds(tmp_path, fonts)
+    _, mounted_hash, _ = await _sandbox_spec(tmp_path, fonts)
     assert mounted_hash != plain_hash  # 挂载变化会让空闲沙盒按配置哈希重建
 
 
@@ -56,8 +88,59 @@ async def test_relative_dir_becomes_absolute(
 ) -> None:
     (tmp_path / "rel").mkdir()
     monkeypatch.chdir(tmp_path)
-    binds, _ = await _binds(tmp_path, Path("rel"))
+    binds, _, _ = await _sandbox_spec(tmp_path, Path("rel"))
     assert f"{tmp_path / 'rel'}:{SOUNDFONT_MOUNT}:ro" in binds
+
+
+async def test_muse_complete_layout_adds_read_only_binds_env_and_hash(tmp_path: Path) -> None:
+    muse = tmp_path / "muse"
+    _muse_layout(muse)
+    _, plain_hash, plain_env = await _sandbox_spec(tmp_path)
+    binds, muse_hash, env = await _sandbox_spec(tmp_path, muse_dir=muse)
+    assert binds[2:] == [
+        f"{muse / 'Muse Hub Instruments'}:{MUSE_SAMPLES_MOUNT}:ro",
+        f"{muse / 'MuseSampler' / 'lib'}:{MUSE_LIBRARY_MOUNT}:ro",
+        f"{muse / 'home'}:{MUSE_HOME_MOUNT}:ro",
+        f"{muse / 'machine-id'}:/etc/machine-id:ro",
+    ]
+    assert {key: env[key] for key in dict(item.split("=", 1) for item in MUSE_ENV)} == {
+        "MUSESAMPLER_LIB": "/opt/musesampler/lib/libMuseSamplerCoreLib.so",
+        "MUSE_SAMPLES_DIR": "/opt/muse-sounds",
+        "CGMUSIC_MUSE_HOME": "/opt/muse-home",
+    }
+    muse_keys = set(dict(item.split("=", 1) for item in MUSE_ENV))
+    assert not set(plain_env) & muse_keys
+    assert muse_hash != plain_hash  # 挂载变化会让空闲沙盒按配置哈希重建
+
+
+async def test_muse_partial_layout_mounts_nothing_and_sets_no_env(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    muse = tmp_path / "muse"
+    _muse_layout(muse, omit="home")
+    with caplog.at_level(logging.INFO):
+        binds, _, env = await _sandbox_spec(tmp_path, muse_dir=muse)
+    assert len(binds) == 2
+    assert not set(env) & set(dict(item.split("=", 1) for item in MUSE_ENV))
+    assert str(muse / "home") in caplog.text
+    assert caplog.text.count("Muse mounts disabled") == 1
+
+
+async def test_muse_unset_or_missing_layout_is_inert(tmp_path: Path) -> None:
+    _, plain_hash, _ = await _sandbox_spec(tmp_path)
+    binds, missing_hash, env = await _sandbox_spec(tmp_path, muse_dir=tmp_path / "absent")
+    assert len(binds) == 2
+    assert missing_hash == plain_hash
+    assert not set(env) & set(dict(item.split("=", 1) for item in MUSE_ENV))
+
+
+async def test_muse_relative_dir_becomes_absolute(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _muse_layout(tmp_path / "muse")
+    monkeypatch.chdir(tmp_path)
+    binds, _, _ = await _sandbox_spec(tmp_path, muse_dir=Path("muse"))
+    assert f"{tmp_path / 'muse' / 'home'}:{MUSE_HOME_MOUNT}:ro" in binds
 
 
 # ---------------------------------------------------------------- startup

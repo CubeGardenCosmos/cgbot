@@ -86,6 +86,7 @@ level = "INFO"
 [music]
 enabled = true
 # soundfont_dir = "/data/cgbot-data/soundfonts"   # 可选;默认即 host_data_dir/soundfonts
+# muse_dir = "/home/klp/muse-sounds"              # 可选;缺省关闭,完整布局见 deploy.md §3.4
 auto_download_soundfont = true
 auto_render_files = true
 max_file_bytes = 8388608

@@ -284,6 +284,7 @@ async def test_music_disabled_is_inert(harnesses: Any) -> None:
         assert h.app._score_stager is None
         assert h.app._coding is not None
         assert h.app._coding._sandbox._soundfont_dir is None
+        assert h.app._coding._sandbox._muse_dir is None
         await h.app.handle_message(_private(Segment("text", {"text": "midi 乐谱"}), _file()))
         assert h.napcat_calls == []
         h.submit.assert_not_awaited()
@@ -309,10 +310,20 @@ async def test_enabled_wires_mount_prompt_and_wrapped_tools(harnesses: Any) -> N
     try:
         assert h.app._coding is not None
         assert h.app._coding._sandbox._soundfont_dir == h.config.music.soundfont_dir.absolute()
+        assert h.app._coding._sandbox._muse_dir is None
         instructions = await h.app._private_instructions("private:1")
         assert MUSIC_PROMPT in instructions
         for name in ("codex_submit", "codex_steer", "codex_list"):
             assert h.app._runner._tools.get(name) is not None
+    finally:
+        await _close(h)
+
+
+async def test_configured_muse_dir_reaches_sandbox(harnesses: Any, tmp_path: Path) -> None:
+    h: Harness = harnesses('[music]\nenabled = true\nmuse_dir = "muse"\n')
+    try:
+        assert h.app._coding is not None
+        assert h.app._coding._sandbox._muse_dir == tmp_path / "muse"
     finally:
         await _close(h)
 

@@ -81,6 +81,14 @@ class _UserSandbox:
 
 
 SOUNDFONT_MOUNT = "/opt/soundfonts"
+MUSE_SAMPLES_MOUNT = "/opt/muse-sounds"
+MUSE_LIBRARY_MOUNT = "/opt/musesampler/lib"
+MUSE_HOME_MOUNT = "/opt/muse-home"
+MUSE_ENV = (
+    "MUSESAMPLER_LIB=/opt/musesampler/lib/libMuseSamplerCoreLib.so",
+    f"MUSE_SAMPLES_DIR={MUSE_SAMPLES_MOUNT}",
+    f"CGMUSIC_MUSE_HOME={MUSE_HOME_MOUNT}",
+)
 
 
 class DockerSandboxProvider:
@@ -100,6 +108,7 @@ class DockerSandboxProvider:
         ready_interval: float = 1.0,
         reap_interval: float = 30.0,
         soundfont_dir: Path | None = None,
+        muse_dir: Path | None = None,
     ) -> None:
         if not _PREFIX.fullmatch(config.docker.container_prefix):
             raise ValueError("docker.container_prefix must be a valid container-name prefix")
@@ -126,6 +135,7 @@ class DockerSandboxProvider:
         self._bot_host = urlsplit(base).hostname or ""
         self._data_dir = Path(config.docker.host_data_dir)
         self._soundfont_dir = None if soundfont_dir is None else Path(soundfont_dir).absolute()
+        self._muse_dir = None if muse_dir is None else Path(muse_dir).absolute()
 
     # ------------------------------------------------------------------ public API
 
@@ -344,12 +354,17 @@ class DockerSandboxProvider:
         soundfonts = self._soundfont_dir
         if soundfonts is not None and soundfonts.is_dir():
             binds.append(f"{soundfonts}:{SOUNDFONT_MOUNT}:ro")
+        muse_binds = self._muse_binds()
+        binds.extend(muse_binds)
         network = self._config.docker.network
+        env = self._env(uid, ws_token)
+        if muse_binds:
+            env.extend(MUSE_ENV)
         return {
             "Image": self._config.docker.sandbox_image,
             "User": f"{SANDBOX_UID}:{SANDBOX_GID}",
             "WorkingDir": "/workspace",
-            "Env": self._env(uid, ws_token),
+            "Env": env,
             "Labels": {LABEL_MANAGED: "true", LABEL_USER: uid},
             "HostConfig": {
                 "Binds": binds,
@@ -366,6 +381,28 @@ class DockerSandboxProvider:
             },
             "NetworkingConfig": {"EndpointsConfig": {network: {}}},
         }
+
+    def _muse_binds(self) -> list[str]:
+        root = self._muse_dir
+        if root is None:
+            return []
+        # MuseSampler 还要求写 /var/lib/MuseSampler/.config;沙盒镜像用临时可写目录处理它,
+        # 宿主机样本、库、receipt 与 machine-id 始终保持只读。
+        paths = (
+            (root / "Muse Hub Instruments", MUSE_SAMPLES_MOUNT, True),
+            (root / "MuseSampler" / "lib", MUSE_LIBRARY_MOUNT, True),
+            (root / "home", MUSE_HOME_MOUNT, True),
+            (root / "machine-id", "/etc/machine-id", False),
+        )
+        missing = [
+            str(source)
+            for source, _, is_dir in paths
+            if not (source.is_dir() if is_dir else source.is_file())
+        ]
+        if missing:
+            log.info("Muse mounts disabled; missing host paths: %s", ", ".join(missing))
+            return []
+        return [f"{source}:{target}:ro" for source, target, _ in paths]
 
     def _config_hash(self, body: dict[str, Any]) -> str:
         """Keyed digest of the desired container spec; a change recreates the container.
