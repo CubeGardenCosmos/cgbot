@@ -1,0 +1,472 @@
+diff --git a/sandbox/tools/cgmusic/src/main.cpp b/sandbox/tools/cgmusic/src/main.cpp
+index c23f81b..087dd77 100644
+--- a/sandbox/tools/cgmusic/src/main.cpp
++++ b/sandbox/tools/cgmusic/src/main.cpp
+@@ -8,6 +8,7 @@
+ #include <filesystem>
+ #include <iostream>
+ #include <optional>
++#include <fstream>
+ #include <set>
+ #include <sstream>
+ #include <string>
+@@ -20,6 +21,8 @@
+ #include "musicxml.hpp"
+ #include "render.hpp"
+ #include "soundfont.hpp"
++#include "muse/calibrate.hpp"
++#include "muse/levels.hpp"
+ 
+ namespace fs = std::filesystem;
+ 
+@@ -60,6 +63,7 @@ struct RenderArgs {
+   std::vector<std::string> font_for_channel;
+   std::optional<std::string> reverb_room;
+   std::optional<std::string> reverb_level;
++  std::optional<std::string> hands;
+ };
+ 
+ RenderArgs parse_render_args(int argc, char** argv) {
+@@ -88,6 +92,8 @@ RenderArgs parse_render_args(int argc, char** argv) {
+       args.reverb_room = value();
+     } else if (arg == "--reverb-level") {
+       args.reverb_level = value();
++    } else if (arg == "--hands") {
++      args.hands = value();
+     } else if (!arg.empty() && arg[0] == '-') {
+       throw Error("bad_input", "Unknown option " + arg);
+     } else if (args.input) {
+@@ -98,7 +104,7 @@ RenderArgs parse_render_args(int argc, char** argv) {
+   }
+   if (!args.input) {
+     throw Error("bad_input",
+-                "usage: cgmusic render <file> [--engine fluidsynth|muse] [--soundfont ID|FILE] [--fmt mp3|wav|flac] "
++                "usage: cgmusic render <file> [--engine fluidsynth|muse] [--hands merge|raw] [--soundfont ID|FILE] [--fmt mp3|wav|flac] "
+                 "[-o OUT] [--gain G] [--reverb CH=0-127]... [--font-for-channel CH=ID]... "
+                 "[--reverb-room R] [--reverb-level L]");
+   }
+@@ -134,6 +140,12 @@ double parse_gain(const std::optional<std::string>& text) {
+   return parse_number(*text, -kMaxGainDb, kMaxGainDb, "--gain");
+ }
+ 
++HandMergeMode parse_hands_mode(const std::string& text) {
++  if (text == "merge") return HandMergeMode::Merge;
++  if (text == "raw") return HandMergeMode::Raw;
++  throw Error("bad_input", "--hands expects merge or raw");
++}
++
+ // --reverb CH=V:MIDI 通道 1-16 的混响发送(CC91,0-127),同一通道只能指定一次。
+ ReverbOptions parse_reverb_options(const RenderArgs& args) {
+   ReverbOptions reverb;
+@@ -188,6 +200,7 @@ int cmd_render(int argc, char** argv) {
+   const AudioFormat format = parse_format(args.fmt.value_or("mp3"));
+   const double gain_db = parse_gain(args.gain);
+ 
++  const HandMergeMode hands_mode = parse_hands_mode(args.hands.value_or("merge"));
+   RenderOptions options;
+   // 声部平衡固定开启;CGMUSIC_BALANCE=off 仅供开发测试,不在 CLI 与 SKILL.md 中公开。
+   const char* balance_env = std::getenv("CGMUSIC_BALANCE");
+@@ -207,6 +220,8 @@ int cmd_render(int argc, char** argv) {
+     sequence = parse_midi(musicxml_to_midi(data, input.filename().string()));
+   }
+ 
++  const HandMergeReport hand_report = apply_hand_merge(sequence, hands_mode);
++
+   RenderReport report;
+   MuseRenderResult muse_report;
+   std::optional<SoundfontInfo> font;
+@@ -295,6 +310,19 @@ int cmd_render(int argc, char** argv) {
+     print_missing(report.fallbacks[i]);
+   }
+   std::cout << "]";
++  std::cout << ",\"hand_merge\":{\"mode\":"
++            << json_string(hand_report.mode == HandMergeMode::Merge ? "merge" : "raw")
++            << ",\"channels\":[";
++  for (std::size_t i = 0; i < hand_report.channels.size(); ++i) {
++    const auto& ch = hand_report.channels[i];
++    if (i != 0) std::cout << ",";
++    std::cout << "{\"ch\":" << ch.channel
++              << ",\"program\":" << ch.program
++              << ",\"tracks\":" << ch.tracks
++              << ",\"modified_notes\":" << ch.modified_notes
++              << ",\"accented_notes\":" << ch.accented_notes << "}";
++  }
++  std::cout << "]}";
+   if (engine == RenderEngine::Muse) {
+     std::cout << ",\"muse\":{\"version\":" << json_string(muse_report.version)
+               << ",\"dry_seconds\":" << number(muse_report.dry_seconds) << ",\"tracks\":[";
+@@ -308,6 +336,16 @@ int cmd_render(int argc, char** argv) {
+                 << ",\"notes\":" << track.note_count
+                 << ",\"rms_dbfs\":" << number(track.rms_dbfs) << "}";
+     }
++    std::cout << "],\"level_check\":[";
++    for (std::size_t i = 0; i < muse_report.level_check.size(); ++i) {
++      const LevelCheckReport& check = muse_report.level_check[i];
++      if (i != 0) std::cout << ",";
++      std::cout << "{\"channel\":" << check.channel << ",\"name\":" << json_string(check.name)
++                << ",\"active_rms_dbfs\":" << number(check.active_rms_dbfs)
++                << ",\"expected_rms_dbfs\":" << number(check.expected_rms_dbfs)
++                << ",\"deviation_db\":" << number(check.deviation_db)
++                << ",\"mean_velocity\":" << number(check.mean_velocity) << "}";
++    }
+     std::cout << "],\"mix\":" << muse_report.mix_report << "}";
+   }
+   std::cout << "}\n";
+@@ -368,11 +406,50 @@ int cmd_analyze(int argc, char** argv) {
+             << ",\"duration_s\":" << number(quality.duration_s) << "}\n";
+   return 0;
+ }
++int cmd_calibrate(int argc, char** argv) {
++  muse::CalibrateOptions options;
++  std::optional<std::string> out_cpp;
++  for (int i = 2; i < argc; ++i) {
++    const std::string arg = argv[i];
++    const auto value = [&]() -> std::string {
++      if (i + 1 >= argc) throw Error("bad_input", "Missing value for " + arg);
++      return argv[++i];
++    };
++    if (arg == "--engine") {
++      const std::string eng = value();
++      if (eng != "muse") throw Error("bad_input", "calibrate only supports --engine muse");
++    } else if (arg == "--samples-dir") {
++      options.samples_dir = value();
++    } else if (arg == "--soundfont-dir") {
++      options.soundfont_dir = value();
++    } else if (arg == "--out-cpp") {
++      out_cpp = value();
++    } else if (arg == "--json") {
++      // default format is json
++    } else {
++      throw Error("bad_input", "Unknown option for calibrate: " + arg);
++    }
++  }
++  const auto results = muse::run_calibration(options);
++  if (out_cpp) {
++    const std::string code = muse::generate_levels_cpp(results);
++    std::ofstream out(*out_cpp);
++    if (!out) throw Error("bad_input", "Cannot write to " + *out_cpp);
++    out << code;
++    std::cout << "{\"written\":" << json_string(*out_cpp)
++              << ",\"count\":" << results.size() << "}\n";
++    return 0;
++  }
++  std::cout << muse::format_calibration_json(results);
++  return 0;
++}
++
+ 
+ int run(int argc, char** argv) {
+-  if (argc < 2) throw Error("bad_input", "usage: cgmusic render|presets|soundfonts|analyze ...");
++  if (argc < 2) throw Error("bad_input", "usage: cgmusic render|calibrate|presets|soundfonts|analyze ...");
+   const std::string command = argv[1];
+   if (command == "render") return cmd_render(argc, argv);
++  if (command == "calibrate") return cmd_calibrate(argc, argv);
+   if (command == "presets") return cmd_presets(argc, argv);
+   if (command == "soundfonts") return cmd_soundfonts();
+   if (command == "analyze") return cmd_analyze(argc, argv);
+diff --git a/sandbox/tools/cgmusic/src/muse/render.cpp b/sandbox/tools/cgmusic/src/muse/render.cpp
+index 71a0752..8ac9732 100644
+--- a/sandbox/tools/cgmusic/src/muse/render.cpp
++++ b/sandbox/tools/cgmusic/src/muse/render.cpp
+@@ -1,10 +1,13 @@
+ #include "muse/render.hpp"
+ #include "muse/mapping.hpp"
++#include "muse/levels.hpp"
++#include "encode.hpp"
+ #include "soundfont.hpp"
+ 
+ #include <algorithm>
+ #include <array>
+ #include <chrono>
++#include <fstream>
+ #include <cmath>
+ #include <cstdlib>
+ #include <filesystem>
+@@ -111,24 +114,29 @@ std::vector<ChannelState> channel_states(const MidiSequence& sequence, std::size
+ struct OpenNote {
+   double start = 0.0;
+   double tempo = 120.0;
++  std::size_t plan = 0;
++  int velocity = 100;
+ };
+ 
+-void close_note(ChannelPlan& plan, std::array<std::vector<OpenNote>, 128>& open, int pitch,
+-                double end) {
+-  std::vector<OpenNote>& notes = open[static_cast<std::size_t>(pitch)];
+-  if (notes.empty()) return;  // 与 FluidSynth 一致:没有对应 note-on 的 note-off 不产生事件。
+-  const OpenNote note = notes.back();
+-  notes.pop_back();
+-  if (!(end > note.start)) return;
+ 
++void close_owned_note(std::vector<ChannelPlan>& plans, std::vector<ChannelPlan>& overflow,
++                      std::vector<std::array<std::vector<OpenNote>, 128>>& open,
++                      std::size_t channel, int pitch, double end) {
++  auto& stack = open[channel][static_cast<std::size_t>(pitch)];
++  if (stack.empty()) return;
++  const OpenNote note = stack.back();
++  stack.pop_back();
++  if (!(end > note.start)) return;
++  auto& target_plan = note.plan < plans.size() ? plans[note.plan] : overflow[note.plan - plans.size()];
+   abi::ms_NoteEvent_5 event{};
+   event._voice = 0;
+-  event._articulation = articulation_for_program(plan.program);
++  event._articulation = articulation_for_program(target_plan.program);
+   event._location_us = microseconds(note.start);
+   event._duration_us = microseconds(end - note.start);
+   event._pitch = pitch;
+   event._tempo = note.tempo;
+-  plan.notes.push_back(event);
++  target_plan.notes.push_back(event);
++  target_plan.dynamics.push_back({microseconds(note.start), note.velocity / 127.0});
+ }
+ 
+ }  // namespace
+@@ -197,6 +205,8 @@ std::vector<ChannelPlan> plan_channels(const MidiSequence& sequence,
+   }
+ 
+   std::vector<std::array<std::vector<OpenNote>, 128>> open(num_channels);
++  // Muse 0.106.0 的多 voice 同音重叠会崩溃;将实际重叠声部交给独立采样器实例。
++  std::vector<ChannelPlan> overflow_plans;
+   for (const MidiEvent& event : sequence.events) {
+     const int channel = event.channel;
+     if (channel < 0 || static_cast<std::size_t>(channel) >= num_channels) continue;
+@@ -206,32 +216,63 @@ std::vector<ChannelPlan> plan_channels(const MidiSequence& sequence,
+     const int pitch = event.data1;
+     switch (event.status & 0xF0) {
+       case 0x80:
+-        close_note(plan, open[channel], pitch, event.seconds);
++        close_owned_note(plans, overflow_plans, open,
++                         static_cast<std::size_t>(channel), pitch, event.seconds);
+         break;
+       case 0x90:
+         if (event.data2 == 0) {
+-          close_note(plan, open[channel], pitch, event.seconds);
++          close_owned_note(plans, overflow_plans, open,
++                           static_cast<std::size_t>(channel), pitch, event.seconds);
++        } else if (open[channel][static_cast<std::size_t>(pitch)].empty()) {
++          open[channel][static_cast<std::size_t>(pitch)].push_back(
++              {event.seconds, midi_tempo_at(sequence, event.seconds).bpm(), static_cast<std::size_t>(channel), event.data2});
+         } else {
++          ChannelPlan overflow = plan;
++          overflow.notes.clear();
++          overflow.dynamics.clear();
++          const std::size_t index = num_channels + overflow_plans.size();
++          overflow_plans.push_back(std::move(overflow));
+           open[channel][static_cast<std::size_t>(pitch)].push_back(
+-              {event.seconds, midi_tempo_at(sequence, event.seconds).bpm()});
++              {event.seconds, midi_tempo_at(sequence, event.seconds).bpm(), index, event.data2});
+         }
+         break;
+       default:
+         break;
+     }
+   }
++  for (std::size_t index = 0; index < overflow_plans.size(); ++index) {
++    plans.push_back(std::move(overflow_plans[index]));
++  }
+   for (std::size_t channel = 0; channel < num_channels; ++channel) {
+     if (!states[channel].used) continue;
+     for (int pitch = 0; pitch < 128; ++pitch) {
+       while (!open[channel][static_cast<std::size_t>(pitch)].empty()) {
+-        close_note(plans[channel], open[channel], pitch, sequence.duration_s);
++        close_owned_note(plans, plans, open, channel, pitch, sequence.duration_s);
+       }
+     }
+-    const double velocity = states[channel].velocity / 127.0;
+-    plans[channel].dynamics.push_back({0, velocity});
++    // 力度曲线按音符起点逐个写入(此前整个声部只用最后一个音的力度)。
+     plans[channel].sends.used = true;
+   }
+-
++  // 力度事件按时间排序;同一时刻保留最后一个,相邻相同值合并;首个事件前移到 0。
++  for (ChannelPlan& plan : plans) {
++    auto& dyn = plan.dynamics;
++    if (dyn.empty()) continue;
++    std::stable_sort(dyn.begin(), dyn.end(), [](const abi::ms_DynamicsEvent_2& a, const abi::ms_DynamicsEvent_2& b) {
++      return a._location_us < b._location_us;
++    });
++    std::vector<abi::ms_DynamicsEvent_2> out;
++    for (const abi::ms_DynamicsEvent_2& e : dyn) {
++      if (!out.empty() && out.back()._location_us == e._location_us) out.back() = e;
++      else if (out.empty() || out.back()._value != e._value) out.push_back(e);
++    }
++    out.front()._location_us = 0;
++    {
++      double sum = 0.0;
++      for (const abi::ms_DynamicsEvent_2& e : out) sum += e._value;
++      plan.mean_velocity = sum / static_cast<double>(out.size()) * 127.0;
++    }
++    dyn = std::move(out);
++  }
+   // 按通道的拨奏切换列表更新音符的关节标志
+   for (std::size_t channel = 0; channel < num_channels; ++channel) {
+     if (!states[channel].used) continue;
+@@ -361,6 +402,18 @@ Audio SamplerSession::render(std::size_t frames) {
+ 
+ DryRender render_dry(const MuseLib& lib, const std::vector<ChannelPlan>& plans,
+                      std::size_t frames) {
++  if (const char* dump = std::getenv("CGMUSIC_DUMP_STEMS"); dump != nullptr && *dump != '\0') {
++    const fs::path directory(dump);
++    fs::create_directories(directory);
++    for (const ChannelPlan& plan : plans) {
++      std::ofstream events(directory / ("channel-" + std::to_string(plan.channel + 1) + ".csv"));
++      events << "start_us,duration_us,pitch,voice\n";
++      for (const auto& note : plan.notes) {
++        events << note._location_us << ',' << note._duration_us << ','
++               << note._pitch << ',' << note._voice << '\n';
++      }
++    }
++  }
+   DryRender result;
+   const auto start = std::chrono::steady_clock::now();
+   result.stems.reserve(plans.size());
+@@ -370,6 +423,15 @@ DryRender render_dry(const MuseLib& lib, const std::vector<ChannelPlan>& plans,
+     result.stems.push_back(session.render(frames));
+   }
+   result.seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
++  if (const char* dump = std::getenv("CGMUSIC_DUMP_STEMS"); dump != nullptr && *dump != '\0') {
++    const fs::path directory(dump);
++    fs::create_directories(directory);
++    for (std::size_t i = 0; i < plans.size(); ++i) {
++      const std::string stem = "channel-" + std::to_string(plans[i].channel + 1) + "-stem-" +
++                               std::to_string(i + 1);
++      encode_audio(result.stems[i], AudioFormat::Wav, directory / (stem + ".wav"));
++    }
++  }
+   return result;
+ }
+ 
+@@ -390,16 +452,24 @@ double stem_rms_dbfs(const Audio& stem) {
+   return 20.0 * std::log10(rms);
+ }
+ 
+-// 回落到 FluidSynth(GM 音源)的通道及 Muse 打击乐声部先削 12 dB,避免盖过其他 Muse 采样音色。
+-constexpr float kFallbackGain = 0.25118864F;  // 10^(-12/20)
+ 
+-// 判断声部是否为打击乐家族(需削 12 dB)
+-bool is_percussion_family(std::string_view family, std::string_view instrument) {
+-  if (family == "percussion" || family == "drumline") return true;
+-  return instrument.find("Drum") != std::string_view::npos ||
+-         instrument.find("Perc") != std::string_view::npos;
++double active_rms_dbfs(const MixInput& stem, const ChannelPlan& plan) {
++  double sum = 0.0;
++  std::size_t frames = 0;
++  for (const abi::ms_NoteEvent_5& note : plan.notes) {
++    const auto begin = static_cast<std::size_t>(std::max<long long>(0, note._location_us) * kSampleRate / 1'000'000);
++    const auto end = std::min(stem.left.size(),
++                              begin + static_cast<std::size_t>(note._duration_us * kSampleRate / 1'000'000));
++    for (std::size_t i = begin; i < end; ++i) {
++      sum += static_cast<double>(stem.left[i]) * stem.left[i] + static_cast<double>(stem.right[i]) * stem.right[i];
++    }
++    if (end > begin) frames += end - begin;
++  }
++  if (frames == 0 || sum <= 0.0) return -120.0;
++  return 10.0 * std::log10(sum / (2.0 * static_cast<double>(frames)));
+ }
+ 
++
+ Audio mix_hybrid(const DryRender& dry, const std::vector<ChannelPlan>& muse_plans,
+                  const std::vector<Audio>& fallback_stems,
+                  const std::vector<ChannelPlan>& fallback_plans,
+@@ -443,11 +513,11 @@ Audio mix_hybrid(const DryRender& dry, const std::vector<ChannelPlan>& muse_plan
+     input.channel = plan.channel + 1;
+     input.left = dry.stems[i].channels[0];
+     input.right = dry.stems[i].channels[1];
+-    // Muse 打击乐家族(Drum Kit 等)施加 -12 dB 衰减,与 FluidSynth 回退保持同等平衡
+-    if (is_percussion_family(plan.family, plan.instrument_name)) {
+-      for (float& sample : input.left) sample *= kFallbackGain;
+-      for (float& sample : input.right) sample *= kFallbackGain;
+-    }
++    // 应用基于实测库电平与声学原则目标电平的固定标定增益 (target_mf - measured_mf)
++    const LevelCalibration& cal = find_calibration(plan.instrument_name, plan.family, plan.program);
++    const float cal_gain = static_cast<float>(std::pow(10.0, cal.gain_db / 20.0));
++    for (float& sample : input.left) sample *= cal_gain;
++    for (float& sample : input.right) sample *= cal_gain;
+     input.reverb_send = plan.sends.reverb;
+     stems.push_back(std::move(input));
+   }
+@@ -458,19 +528,54 @@ Audio mix_hybrid(const DryRender& dry, const std::vector<ChannelPlan>& muse_plan
+     input.channel = plan.channel + 1;
+     input.left = fallback_stems[i].channels[0];
+     input.right = fallback_stems[i].channels[1];
+-    for (float& sample : input.left) sample *= kFallbackGain;
+-    for (float& sample : input.right) sample *= kFallbackGain;
++    // FluidSynth 回退通道同样应用标定增益
++    const std::string_view name = plan.instrument_name.empty() ? plan.part_name : plan.instrument_name;
++    const LevelCalibration& cal = find_calibration(name, plan.family, plan.program);
++    const float cal_gain = static_cast<float>(std::pow(10.0, cal.gain_db / 20.0));
++    for (float& sample : input.left) sample *= cal_gain;
++    for (float& sample : input.right) sample *= cal_gain;
+     input.reverb_send = plan.sends.reverb;
+     stems.push_back(std::move(input));
+   }
+ 
+ 
++  // 纯报告质量门限检查:对比各声部实测电平与标定模型预测电平 (target_mf + slope*(mean_velocity - 80))。
++  // 仅在偏离绝对值 > 6 dB 时记入 level_check 报告,绝不改变任何音频数据。
++  {
++    const std::size_t muse_count = muse_plans.size();
++    const auto plan_at = [&](std::size_t i) -> const ChannelPlan& {
++      return i < muse_count ? muse_plans[i] : fallback_plans[i - muse_count];
++    };
++    for (std::size_t i = 0; i < stems.size(); ++i) {
++      const ChannelPlan& plan = plan_at(i);
++      const double actual_level = active_rms_dbfs(stems[i], plan);
++      if (actual_level <= -100.0) continue;
++      const std::string_view name = !plan.instrument_name.empty() ? plan.instrument_name : plan.part_name;
++      const LevelCalibration& cal = find_calibration(name, plan.family, plan.program);
++      const double expected_level = cal.target_mf + cal.slope * (plan.mean_velocity - 80.0);
++      const double deviation = actual_level - expected_level;
++      if (std::abs(deviation) > 6.0) {
++        LevelCheckReport check;
++        check.channel = plan.channel + 1;
++        check.name = std::string(name);
++        check.active_rms_dbfs = actual_level;
++        check.expected_rms_dbfs = expected_level;
++        check.deviation_db = deviation;
++        check.mean_velocity = plan.mean_velocity;
++        if (report) report->level_check.push_back(std::move(check));
++      }
++    }
++  }
++
++  // 临时试听开关:绕过非打击乐声部的自动响度均衡和母带动态压缩,便于听辨木管真实干声电平。
++  // 打击乐与 FluidSynth 回退的 -12 dB 衰减、-14 LUFS 响度目标与真峰值限制保持生效。
++  constexpr bool kTemporaryAuditionBypass = true;
+   MixOptions mix;
+   mix.reverb_room = options.reverb.room.value_or(0.75);
+   mix.reverb_level = options.reverb.level.value_or(1.0);
+   mix.target_lufs = target_lufs;
+-  mix.auto_balance = options.balance;
+-  mix.master_dynamics = true;
++  mix.auto_balance = kTemporaryAuditionBypass ? false : options.balance;
++  mix.master_dynamics = !kTemporaryAuditionBypass;
+   const MixResult mixed = mix_stems(stems, mix);
+ 
+   if (report) {
+diff --git a/sandbox/tools/cgmusic/src/render.hpp b/sandbox/tools/cgmusic/src/render.hpp
+index c7b4311..1f33d45 100644
+--- a/sandbox/tools/cgmusic/src/render.hpp
++++ b/sandbox/tools/cgmusic/src/render.hpp
+@@ -110,9 +110,21 @@ struct MuseTrackReport {
+   double rms_dbfs = 0.0;  // 干声 RMS(dBFS);0 表示未计算
+ };
+ 
++// 质量门限检查报告:对比声部实测电平与标定预测电平(target_mf + slope*(mean_velocity - 80)),
++// 偏离 > 6 dB 者记录。纯报告机制,绝不改动音频。
++struct LevelCheckReport {
++  int channel = 0;                  // 1 起
++  std::string name;
++  double active_rms_dbfs = 0.0;     // 经标定增益后的发音窗口 RMS
++  double expected_rms_dbfs = 0.0;   // 标定预测值
++  double deviation_db = 0.0;        // actual - expected
++  double mean_velocity = 0.0;       // 声部平均力度
++};
++
+ struct MuseRenderResult {
+   std::vector<MuseTrackReport> tracks;
+   std::vector<MissingPreset> fallbacks;  // 回退到 FluidSynth 的通道记录
++  std::vector<LevelCheckReport> level_check;  // 偏离标定预期 > 6 dB 的声部记录(不改动音频)
+   std::string version;
+   double reverb_room = 0.0;
+   double reverb_level = 0.0;
